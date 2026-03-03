@@ -1,0 +1,2318 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORYZAE Export Ops v3.0</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #root { height: 100%; }
+  body { font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', -apple-system, sans-serif; }
+  button:hover { opacity: 0.85; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #C8850A; outline-offset: -1px; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useEffect, useMemo } = React;
+
+// ============================================================
+// DATA: PRODUCTS (existing + nutrition data for FDA labels)
+// ============================================================
+const PRODUCT_DATABASE = [
+  {
+    id:"sweetener_liquid", name:"米麹由来液体甘味料", nameEn:"Rice Koji Liquid Sweetener",
+    examples:["オリゼ甘味料（液体）", "米麹シロップ"], hsCode:"1702.90", htsUs:"1702.90.5200",
+    description:"その他の糖類（フルクトース・グルコース混合含む）", chapter: 17,
+    notes:"麹の酵素作用で米のデンプンを糖化した液体シロップ。主成分がグルコース・マルトースの場合。",
+    factors:["糖類の組成比率", "Brix値", "フルクトース含有率"],
+    tags:["甘味料", "液体", "米麹", "シロップ"],
+    thresholds:[
+      { param:"フルクトース含有率(%)", key:"fructose", boundary: 50, below:"1702.90", above:"1702.60", note:"乾燥状態での重量比で判定" },
+      { param:"グルコース含有率(%)", key:"glucose", boundary: 20, below:"2106.90（調製食品）", above:"1702.30（ぶどう糖）", note:"グルコースが主成分の場合" },
+    ],
+    alternatives:[
+      { hsCode:"1702.30", name:"ぶどう糖及びぶどう糖水", condition:"グルコース含有量が乾燥状態で20%以上の場合", likelihood:"mid" },
+      { hsCode:"1702.60", name:"その他のフルクトース", condition:"フルクトース含有量が乾燥状態で50%超の場合", likelihood:"low" },
+      { hsCode:"2106.90", name:"その他の調製食料品", condition:"機能性成分添加の複合製品の場合", likelihood:"mid" },
+    ],
+    nutrition:{
+      servingSize:"1 tbsp (21g)", servingSizeMetric:"21g", servingsPerContainer: 24,
+      calories: 60, totalFat: 0, saturatedFat: 0, transFat: 0, cholesterol: 0, sodium: 0,
+      totalCarb: 15, dietaryFiber: 0, totalSugars: 12, addedSugars: 0, protein: 0,
+      vitD: 0, calcium: 0, iron: 0, potassium: 10,
+      ingredients:"Rice Koji Extract (Water, Rice, Aspergillus Oryzae Culture)",
+      allergens:[], allergenNote:"Produced in a facility that processes soy.",
+      netWeight:"500 mL (16.9 fl oz)", netWeightG: 500,
+    },
+    materials:[
+      { name:"国産米", origin:"JP", hsCode:"1006.30", value: 40 },
+      { name:"種麹（A. oryzae）", origin:"JP", hsCode:"2102.20", value: 5 },
+      { name:"水", origin:"JP", hsCode:"2201.90", value: 5 },
+    ],
+    processingSteps:["精米", "蒸米", "製麹（48時間培養）", "糖化（55-60℃）", "濾過", "殺菌", "充填"],
+  },
+  {
+    id:"sweetener_powder", name:"米麹由来粉末甘味料", nameEn:"Rice Koji Powder Sweetener",
+    examples:["オリゼ甘味料（粉末）", "米麹パウダー"], hsCode:"1702.90", htsUs:"1702.90.4000",
+    description:"その他の糖類（固体）", chapter: 17,
+    notes:"液体甘味料を乾燥・粉末化したもの。デキストリン等の添加がある場合は2106.90も検討。",
+    factors:["糖類の組成比率", "添加物の有無", "乾燥方法"],
+    tags:["甘味料", "粉末", "米麹"],
+    thresholds:[
+      { param:"賦形剤比率(%)", key:"excipient", boundary: 30, below:"1702.90", above:"2106.90（調製食品）", note:"デキストリン等の賦形剤割合" },
+    ],
+    alternatives:[
+      { hsCode:"2106.90", name:"その他の調製食料品", condition:"デキストリン等の賦形剤を一定割合以上含む場合", likelihood:"high" },
+      { hsCode:"1901.90", name:"穀粉等の調製食料品", condition:"米粉比率が高く糖化が部分的な場合", likelihood:"mid" },
+    ],
+    nutrition:{
+      servingSize:"1 tsp (4g)", servingSizeMetric:"4g", servingsPerContainer: 62,
+      calories: 15, totalFat: 0, saturatedFat: 0, transFat: 0, cholesterol: 0, sodium: 0,
+      totalCarb: 4, dietaryFiber: 0, totalSugars: 3, addedSugars: 0, protein: 0,
+      vitD: 0, calcium: 0, iron: 0, potassium: 2,
+      ingredients:"Rice Koji Powder (Rice, Aspergillus Oryzae Culture), Maltodextrin",
+      allergens:[], allergenNote:"Produced in a facility that processes soy.",
+      netWeight:"250 g (8.8 oz)", netWeightG: 250,
+    },
+    materials:[
+      { name:"国産米", origin:"JP", hsCode:"1006.30", value: 35 },
+      { name:"種麹（A. oryzae）", origin:"JP", hsCode:"2102.20", value: 5 },
+      { name:"マルトデキストリン", origin:"JP", hsCode:"1702.90", value: 10 },
+    ],
+    processingSteps:["精米", "蒸米", "製麹", "糖化", "濾過", "噴霧乾燥", "粉砕", "充填"],
+  },
+  {
+    id:"amazake_beverage", name:"甘酒（飲料）", nameEn:"Amazake (Ready-to-drink)",
+    examples:["甘酒ストレート", "甘酒ドリンク"], hsCode:"2202.99", htsUs:"2202.99.9000",
+    description:"その他のノンアルコール飲料（アルコール分0.5%以下）", chapter: 22,
+    notes:"アルコール分0.5%vol以下のRTD甘酒。0.5%超の場合は2206.00。",
+    factors:["アルコール度数", "乳成分の有無", "容器サイズ"],
+    tags:["飲料", "甘酒", "ノンアルコール", "RTD"],
+    thresholds:[
+      { param:"アルコール度数(%vol)", key:"abv", boundary: 0.5, below:"2202.99", above:"2206.00（発酵飲料）", note:"製造ロットによる変動に注意" },
+    ],
+    alternatives:[
+      { hsCode:"2206.00", name:"その他の発酵飲料", condition:"アルコール分が0.5%vol超の場合", likelihood:"high" },
+      { hsCode:"2106.90", name:"その他の調製食料品", condition:"粥状で「飲料」より「食品」に近い形態の場合", likelihood:"mid" },
+    ],
+    nutrition:{
+      servingSize:"1 bottle (200mL)", servingSizeMetric:"200mL", servingsPerContainer: 1,
+      calories: 80, totalFat: 0, saturatedFat: 0, transFat: 0, cholesterol: 0, sodium: 30,
+      totalCarb: 18, dietaryFiber: 0.5, totalSugars: 14, addedSugars: 0, protein: 1,
+      vitD: 0, calcium: 5, iron: 0.2, potassium: 20,
+      ingredients:"Water, Rice, Rice Koji (Rice, Aspergillus Oryzae Culture)",
+      allergens:[], allergenNote:"Produced in a facility that processes soy.",
+      netWeight:"200 mL (6.8 fl oz)", netWeightG: 200,
+    },
+    materials:[
+      { name:"国産米", origin:"JP", hsCode:"1006.30", value: 25 },
+      { name:"種麹（A. oryzae）", origin:"JP", hsCode:"2102.20", value: 3 },
+      { name:"水", origin:"JP", hsCode:"2201.90", value: 5 },
+    ],
+    processingSteps:["精米", "蒸米", "製麹", "仕込み（米粥+麹）", "糖化", "殺菌", "充填"],
+  },
+  {
+    id:"amazake_concentrate", name:"甘酒（濃縮・ペースト）", nameEn:"Amazake Concentrate/Paste",
+    examples:["甘酒の素", "濃縮甘酒"], hsCode:"2106.90", htsUs:"2106.90.9998",
+    description:"その他の調製食料品", chapter: 21,
+    notes:"希釈して飲用する濃縮タイプや調理用ペースト。",
+    factors:["希釈倍率", "用途", "糖度"],
+    tags:["甘酒", "濃縮", "ペースト", "調製食品"],
+    thresholds:[],
+    alternatives:[
+      { hsCode:"1702.90", name:"その他の糖類", condition:"糖化が完全で糖液に近い場合", likelihood:"mid" },
+    ],
+    nutrition:{
+      servingSize:"2 tbsp (30g)", servingSizeMetric:"30g", servingsPerContainer: 10,
+      calories: 70, totalFat: 0, saturatedFat: 0, transFat: 0, cholesterol: 0, sodium: 15,
+      totalCarb: 17, dietaryFiber: 0.3, totalSugars: 13, addedSugars: 0, protein: 0.5,
+      vitD: 0, calcium: 3, iron: 0.1, potassium: 15,
+      ingredients:"Rice, Rice Koji (Rice, Aspergillus Oryzae Culture), Water",
+      allergens:[], allergenNote:"Produced in a facility that processes soy.",
+      netWeight:"300 g (10.6 oz)", netWeightG: 300,
+    },
+    materials:[
+      { name:"国産米", origin:"JP", hsCode:"1006.30", value: 40 },
+      { name:"種麹（A. oryzae）", origin:"JP", hsCode:"2102.20", value: 5 },
+      { name:"水", origin:"JP", hsCode:"2201.90", value: 3 },
+    ],
+    processingSteps:["精米", "蒸米", "製麹", "仕込み", "糖化", "濃縮", "殺菌", "充填"],
+  },
+  {
+    id:"kojipop", name:"KOJIPOP", nameEn:"KOJIPOP Fermented Recovery Soda",
+    examples:["KOJIPOP（炭酸飲料）"], hsCode:"2202.10", htsUs:"2202.10.0000",
+    description:"水（鉱水及び炭酸水を含む）に砂糖等を加えた飲料", chapter: 22,
+    notes:"米麹発酵エキスに炭酸を加えたRTD飲料。HS2202.10は「甘味を付けた水（炭酸含む）」。",
+    factors:["炭酸の有無", "甘味料の種類", "アルコール度数"],
+    tags:["KOJIPOP", "炭酸飲料", "ソーダ", "米麹"],
+    thresholds:[
+      { param:"アルコール度数(%vol)", key:"abv_kp", boundary: 0.5, below:"2202.10", above:"2206.00", note:"" },
+    ],
+    alternatives:[
+      { hsCode:"2202.99", name:"その他のノンアルコール飲料", condition:"2202.10の範囲を超える複合成分を含む場合", likelihood:"mid" },
+    ],
+    nutrition:{
+      servingSize:"1 can (355mL)", servingSizeMetric:"355mL", servingsPerContainer: 1,
+      calories: 35, totalFat: 0, saturatedFat: 0, transFat: 0, cholesterol: 0, sodium: 10,
+      totalCarb: 9, dietaryFiber: 2, totalSugars: 5, addedSugars: 0, protein: 0,
+      vitD: 0, calcium: 5, iron: 0.3, potassium: 40,
+      ingredients:"Sparkling Water, Rice Koji Ferment (Water, Rice, Aspergillus Oryzae Culture), Natural Flavors, Citric Acid",
+      allergens:[], allergenNote:"Produced in a facility that processes soy.",
+      netWeight:"355 mL (12 fl oz)", netWeightG: 355,
+    },
+    materials:[
+      { name:"炭酸水", origin:"JP", hsCode:"2201.10", value: 15 },
+      { name:"米麹発酵エキス", origin:"JP", hsCode:"1702.90", value: 25 },
+      { name:"天然香料", origin:"JP", hsCode:"3302.10", value: 5 },
+      { name:"クエン酸", origin:"JP", hsCode:"2918.14", value: 2 },
+      { name:"アルミ缶", origin:"JP", hsCode:"7612.90", value: 8 },
+    ],
+    processingSteps:["米麹発酵エキス製造", "配合・調合", "炭酸注入", "缶充填・密封", "殺菌", "検品"],
+  },
+  {
+    id:"granola", name:"米麹グラノーラ", nameEn:"Rice Koji Granola",
+    examples:["オリゼグラノーラ", "麹グラノーラ"], hsCode:"1904.20", htsUs:"1904.20.1000",
+    description:"穀物フレークから調製した食料品", chapter: 19,
+    notes:"米麹甘味料で味付けしたグラノーラ。穀物ベース加工食品として19類。",
+    factors:["穀物比率", "甘味料の種類", "添加物"],
+    tags:["グラノーラ", "シリアル", "米麹"],
+    thresholds:[],
+    alternatives:[
+      { hsCode:"1904.10", name:"膨張させた穀物食品", condition:"パフ加工が主の場合", likelihood:"low" },
+      { hsCode:"2106.90", name:"その他の調製食料品", condition:"穀物比率が低くサプリ的性格が強い場合", likelihood:"low" },
+    ],
+    nutrition:{
+      servingSize:"1/3 cup (40g)", servingSizeMetric:"40g", servingsPerContainer: 7,
+      calories: 170, totalFat: 5, saturatedFat: 1, transFat: 0, cholesterol: 0, sodium: 45,
+      totalCarb: 28, dietaryFiber: 3, totalSugars: 8, addedSugars: 0, protein: 4,
+      vitD: 0, calcium: 20, iron: 1.2, potassium: 80,
+      ingredients:"Rolled Oats, Rice Koji Sweetener (Rice, Aspergillus Oryzae Culture), Coconut Oil, Almonds, Pumpkin Seeds, Brown Rice Puffs, Sea Salt",
+      allergens:["tree nuts (almonds)"], allergenNote:"Contains: Tree Nuts (Almonds). Produced in a facility that processes soy, wheat, and milk.",
+      netWeight:"280 g (9.9 oz)", netWeightG: 280,
+    },
+    materials:[
+      { name:"オーツ麦", origin:"AU", hsCode:"1104.22", value: 25 },
+      { name:"米麹甘味料", origin:"JP", hsCode:"1702.90", value: 15 },
+      { name:"ココナッツオイル", origin:"PH", hsCode:"1513.11", value: 8 },
+      { name:"アーモンド", origin:"US", hsCode:"0802.12", value: 10 },
+      { name:"かぼちゃ種子", origin:"CN", hsCode:"1207.99", value: 5 },
+    ],
+    processingSteps:["原料混合", "焼成（150℃）", "冷却", "検品", "充填"],
+  },
+  {
+    id:"koji_seasoning", name:"塩麹・醤油麹調味料", nameEn:"Shio Koji / Shoyu Koji Seasoning",
+    examples:["塩麹", "醤油麹", "麹ドレッシング"], hsCode:"2103.90", htsUs:"2103.90.9000",
+    description:"その他のソース・調味料", chapter: 21,
+    notes:"塩麹は米麹＋塩＋水の発酵調味料。醤油麹は醤油＋米麹。",
+    factors:["塩分濃度", "発酵度合い", "液状/ペースト"],
+    tags:["塩麹", "醤油麹", "調味料"],
+    thresholds:[],
+    alternatives:[
+      { hsCode:"2103.10", name:"醤油", condition:"醤油が主体で麹が補助的な場合", likelihood:"low" },
+    ],
+    nutrition:{
+      servingSize:"1 tsp (6g)", servingSizeMetric:"6g", servingsPerContainer: 42,
+      calories: 5, totalFat: 0, saturatedFat: 0, transFat: 0, cholesterol: 0, sodium: 350,
+      totalCarb: 1, dietaryFiber: 0, totalSugars: 0.5, addedSugars: 0, protein: 0,
+      vitD: 0, calcium: 1, iron: 0, potassium: 5,
+      ingredients:"Rice Koji (Rice, Aspergillus Oryzae Culture), Sea Salt, Water",
+      allergens:[], allergenNote:"Produced in a facility that processes soy and wheat.",
+      netWeight:"250 g (8.8 oz)", netWeightG: 250,
+    },
+    materials:[
+      { name:"国産米", origin:"JP", hsCode:"1006.30", value: 30 },
+      { name:"種麹", origin:"JP", hsCode:"2102.20", value: 5 },
+      { name:"塩", origin:"JP", hsCode:"2501.00", value: 10 },
+    ],
+    processingSteps:["精米", "蒸米", "製麹", "塩水混合", "発酵（常温7-10日）", "殺菌", "充填"],
+  },
+  {
+    id:"fermented_paste", name:"麹発酵ペースト", nameEn:"Koji Fermented Paste",
+    examples:["美容ペースト", "麹パック"], hsCode:"2106.90", htsUs:"2106.90.9998",
+    description:"その他の調製食料品", chapter: 21,
+    notes:"機能性を付加した麹発酵食品。用途・成分により化粧品分類も検討。",
+    factors:["用途（食品/化粧品）", "成分構成"],
+    tags:["ペースト", "機能性", "麹"],
+    thresholds:[],
+    alternatives:[
+      { hsCode:"3304.99", name:"その他の美容用品", condition:"化粧品として販売する場合", likelihood:"mid" },
+    ],
+    nutrition:{
+      servingSize:"1 tbsp (15g)", servingSizeMetric:"15g", servingsPerContainer: 20,
+      calories: 25, totalFat: 0, saturatedFat: 0, transFat: 0, cholesterol: 0, sodium: 10,
+      totalCarb: 6, dietaryFiber: 0.5, totalSugars: 4, addedSugars: 0, protein: 0.5,
+      vitD: 0, calcium: 3, iron: 0.1, potassium: 15,
+      ingredients:"Rice Koji Ferment (Water, Rice, Aspergillus Oryzae Culture), Rice Bran Extract",
+      allergens:[], allergenNote:"Produced in a facility that processes soy.",
+      netWeight:"300 g (10.6 oz)", netWeightG: 300,
+    },
+    materials:[
+      { name:"国産米", origin:"JP", hsCode:"1006.30", value: 30 },
+      { name:"種麹", origin:"JP", hsCode:"2102.20", value: 5 },
+      { name:"米ぬかエキス", origin:"JP", hsCode:"2306.30", value: 10 },
+    ],
+    processingSteps:["原料準備", "製麹", "発酵", "米ぬかエキス混合", "殺菌", "充填"],
+  },
+  {
+    id:"koji_enzyme", name:"麹由来酵素製剤", nameEn:"Koji-derived Enzyme Preparation",
+    examples:["プロテアーゼ製剤", "アミラーゼ製剤"], hsCode:"3507.90", htsUs:"3507.90.0000",
+    description:"その他の酵素及び調製酵素", chapter: 35,
+    notes:"A. oryzae由来の酵素を精製・濃縮した製品。BtoB用。",
+    factors:["酵素の種類・純度", "基質特異性", "用途"],
+    tags:["酵素", "BtoB", "プロテアーゼ", "アミラーゼ"],
+    thresholds:[],
+    alternatives:[
+      { hsCode:"2102.20", name:"単細胞微生物", condition:"酵素精製度が低く微生物培養物に近い場合", likelihood:"mid" },
+    ],
+    nutrition:null,
+    materials:[
+      { name:"種麹", origin:"JP", hsCode:"2102.20", value: 20 },
+      { name:"培養基材", origin:"JP", hsCode:"1006.30", value: 15 },
+    ],
+    processingSteps:["培養基材準備", "大量培養", "酵素抽出", "精製・濃縮", "乾燥", "品質検査", "包装"],
+  },
+  {
+    id:"koji_starter", name:"種麹（スターターカルチャー）", nameEn:"Koji Starter Culture",
+    examples:["種麹", "Koji Spore Starter"], hsCode:"2102.20", htsUs:"2102.20.4000",
+    description:"不活性酵母・単細胞微生物", chapter: 21,
+    notes:"Aspergillus oryzae胞子を米粉等に付着させた種麹。",
+    factors:["生存胞子数", "担体の種類"],
+    tags:["種麹", "スターター", "胞子", "BtoB"],
+    thresholds:[],
+    alternatives:[
+      { hsCode:"3002.90", name:"微生物培養物", condition:"医薬・研究用途の場合", likelihood:"low" },
+    ],
+    nutrition:null,
+    materials:[
+      { name:"種麹原株", origin:"JP", hsCode:"2102.20", value: 30 },
+      { name:"米粉（担体）", origin:"JP", hsCode:"1102.90", value: 10 },
+    ],
+    processingSteps:["原株培養", "胞子採取", "米粉担体混合", "品質検査", "包装"],
+  },
+  {
+    id:"rice_koji_raw", name:"米麹（原料用）", nameEn:"Rice Koji (Raw Material)",
+    examples:["乾燥米麹", "生米麹"], hsCode:"1104.29", htsUs:"1104.29.9000",
+    description:"その他の加工穀物", chapter: 11,
+    notes:"蒸米にA. oryzaeを培養したもの。加工穀物として11類。",
+    factors:["乾燥状態", "生/乾燥", "粉砕の有無"],
+    tags:["米麹", "原料", "乾燥麹", "BtoB"],
+    thresholds:[],
+    alternatives:[
+      { hsCode:"2102.20", name:"単細胞微生物", condition:"微生物培養物としての性格が強い場合", likelihood:"mid" },
+    ],
+    nutrition:{
+      servingSize:"2 tbsp (20g)", servingSizeMetric:"20g", servingsPerContainer: 15,
+      calories: 65, totalFat: 0.5, saturatedFat: 0, transFat: 0, cholesterol: 0, sodium: 0,
+      totalCarb: 14, dietaryFiber: 0.5, totalSugars: 5, addedSugars: 0, protein: 2,
+      vitD: 0, calcium: 5, iron: 0.3, potassium: 25,
+      ingredients:"Rice, Aspergillus Oryzae Culture",
+      allergens:[], allergenNote:"Produced in a facility that processes soy.",
+      netWeight:"300 g (10.6 oz)", netWeightG: 300,
+    },
+    materials:[
+      { name:"国産米", origin:"JP", hsCode:"1006.30", value: 60 },
+      { name:"種麹", origin:"JP", hsCode:"2102.20", value: 5 },
+    ],
+    processingSteps:["精米", "洗米・浸漬", "蒸米", "種付け（種麹接種）", "製麹（48時間）", "乾燥", "包装"],
+  },
+  {
+    id:"fermented_drink_alc", name:"発酵飲料（微アルコール）", nameEn:"Fermented Beverage (Low-Alcohol)",
+    examples:["甘酒（アルコール0.5%超）", "どぶろく風"], hsCode:"2206.00", htsUs:"2206.00.9000",
+    description:"その他の発酵飲料", chapter: 22,
+    notes:"アルコール分0.5%vol超の発酵飲料。酒税法との整合も確認。",
+    factors:["アルコール度数", "原料", "製法"],
+    tags:["発酵飲料", "微アルコール", "どぶろく"],
+    thresholds:[
+      { param:"アルコール度数(%vol)", key:"abv_high", boundary: 0.5, below:"2202.99（ノンアルコール飲料）", above:"2206.00", note:"" },
+    ],
+    alternatives:[
+      { hsCode:"2202.99", name:"その他のノンアルコール飲料", condition:"アルコール分0.5%vol以下の場合", likelihood:"high" },
+    ],
+    nutrition:null,
+    materials:[
+      { name:"国産米", origin:"JP", hsCode:"1006.30", value: 35 },
+      { name:"種麹", origin:"JP", hsCode:"2102.20", value: 5 },
+      { name:"水", origin:"JP", hsCode:"2201.90", value: 5 },
+    ],
+    processingSteps:["精米", "蒸米", "製麹", "仕込み", "発酵", "搾り/濾過", "殺菌", "充填"],
+  },
+];
+
+// ============================================================
+// DATA: TRADE ALERTS & COUNTRIES (March 2, 2026)
+// ============================================================
+const US_TRADE_ALERTS = [
+  { id: "sec122", severity: "critical", title: "Section 122 サーチャージ発効中（10%）", summary: "2026年2月24日〜（150日間・7月24日期限）。CBP確認レート: 10%", detail: "最高裁がIEEPA関税を違憲判決（2/20）。通商法Section 122に基づく暫定サーチャージ10%が全輸入品に適用中。15%への引上げ可能性あり。", lastVerified: "2026-03-02" },
+  { id: "deminimis", severity: "critical", title: "De Minimis 停止継続中（恒久廃止予定）", summary: "$800免税閾値は停止中。全貨物にフォーマルエントリー必要。2027年7月1日恒久廃止", detail: "少額免税$800閾値の停止は継続。D2C小口出荷にも適用。One Big Beautiful Bill Actにより2027年7月1日恒久廃止予定。", lastVerified: "2026-03-02" },
+  { id: "ieepa_refund", severity: "info", title: "IEEPA関税の還付可能性", summary: "2025年2月〜2026年2月に支払ったIEEPA関税は還付対象の可能性", detail: "最高裁違憲判決により推計$1,300〜2,000億の還付対象。管轄権は国際通商裁判所。通関士・弁護士に相談推奨。", lastVerified: "2026-03-02" },
+  { id: "sec122_expiry", severity: "warning", title: "Section 122 期限切れ後の不確実性", summary: "7月24日以降の関税レジームは未定。Section 232/301調査を示唆", detail: "Section 122は150日限定（〜7/24）。政権はS232/S301調査による代替を示唆。", lastVerified: "2026-03-02" },
+  { id: "usjapan_fta", severity: "warning", title: "日米貿易協定の法的地位不明確", summary: "2025年7月合意はIEEPA権限に基づくため法的効力が不明", detail: "Section 122は一律10%適用のため日本特有の優遇なし。再交渉動向注視。", lastVerified: "2026-03-02" },
+];
+
+const COUNTRIES = [
+  {
+    id:"us", name:"米国", flag:"🇺🇸",
+    fta:"日米貿易協定（法的地位不明確）+ Section 122 (10%)",
+    ftaNote:"Section 122一律10%サーチャージ適用中。15%引上げ可能性あり。",
+    section122:{ active: true, rate:"10%", rateNum: 10, effectiveDate:"2026-02-24", expiryDate:"2026-07-24", exemptions:"鉄鋼・アルミ・銅・木材・自動車等。麹製品は免除対象外。" },
+    currency:"USD", exchangeRate: 150,
+    tariffs:{
+      "1702.90":{ mfn:"5.1%", mfnNum: 5.1, surcharge:"10%", effective:"~15.1%", fta:"法的地位不明", note:"MFN 5.1% + Sec122 10%" },
+      "2202.10":{ mfn:"0.2¢/L", mfnNum: 0.1, surcharge:"10%", effective:"~10%", fta:"法的地位不明", note:"KOJIPOP。MFN従量税(実質無税) + Sec122 10%" },
+      "2202.99":{ mfn:"0.2¢/L", mfnNum: 0.1, surcharge:"10%", effective:"~10%", fta:"法的地位不明", note:"甘酒RTD。MFN + Sec122 10%" },
+      "2206.00":{ mfn:"3¢/L", mfnNum: 0.3, surcharge:"10%", effective:"~10%", fta:"法的地位不明", note:"微アルコール飲料" },
+      "1904.20":{ mfn:"無税", mfnNum: 0, surcharge:"10%", effective:"10%", fta:"法的地位不明", note:"" },
+      "2106.90":{ mfn:"6.4%", mfnNum: 6.4, surcharge:"10%", effective:"~16.4%", fta:"法的地位不明", note:"" },
+      "2102.20":{ mfn:"3.2%", mfnNum: 3.2, surcharge:"10%", effective:"~13.2%", fta:"法的地位不明", note:"" },
+      "2103.90":{ mfn:"6.4%", mfnNum: 6.4, surcharge:"10%", effective:"~16.4%", fta:"法的地位不明", note:"" },
+      "1104.29":{ mfn:"0.72¢/kg", mfnNum: 0.1, surcharge:"10%", effective:"~10%", fta:"法的地位不明", note:"" },
+      "3507.90":{ mfn:"無税", mfnNum: 0, surcharge:"10%", effective:"10%", fta:"法的地位不明", note:"" },
+    },
+    customsBrokerFee: 250, merchandiseProcessFee: 0.3464, harborFee: 0.125, bondFee: 50,
+    docs:[
+      { name:"FDA食品施設登録", required: true, desc:"全食品輸出に必須" },
+      { name:"Prior Notice（事前通告）", required: true, desc:"FDA到着72時間前" },
+      { name:"FSVP（外国供給者検証）", required: true, desc:"米国側インポーターが実施" },
+      { name:"Nutrition Facts ラベル", required: true, desc:"FDA規定フォーマット" },
+      { name:"フォーマルエントリー書類", required: true, desc:"CBP Form 7501等" },
+      { name:"原産地証明書", required: false, desc:"FTA税率の法的地位不明確" },
+      { name:"成分分析証明書（COA）", required: true, desc:"アレルゲン・重金属・微生物" },
+      { name:"Commercial Invoice", required: true, desc:"品名・HS・数量・金額" },
+      { name:"Packing List", required: true, desc:"梱包明細" },
+      { name:"B/L or AWB", required: true, desc:"輸送書類" },
+    ],
+    labeling:[
+      { item:"Nutrition Facts", format:"FDA規定フォーマット", mandatory: true },
+      { item:"Ingredients List", format:"重量順。英語一般名称。アレルゲン太字", mandatory: true },
+      { item:"Allergen Statement", format:"Contains: + 9大アレルゲン", mandatory: true },
+      { item:"Net Weight", format:"メトリック＋US慣用単位", mandatory: true },
+      { item:"Country of Origin", format:"\"Product of Japan\"", mandatory: true },
+      { item:"Manufacturer/Distributor", format:"社名・住所", mandatory: true },
+    ],
+  },
+  {
+    id:"eu", name:"EU", flag:"🇪🇺",
+    fta:"日EU EPA（2019年2月発効）",
+    ftaNote:"安定稼働中。Novel Food非該当確認済み。CBAM食品非適用。",
+    currency:"EUR", exchangeRate: 162,
+    tariffs:{
+      "1702.90":{ mfn:"0.4€/kg", mfnNum: 5, fta:"無税", ftaNum: 0, note:"EPA即時撤廃" },
+      "2202.10":{ mfn:"9.6%", mfnNum: 9.6, fta:"無税", ftaNum: 0, note:"" },
+      "2202.99":{ mfn:"9.6%", mfnNum: 9.6, fta:"無税", ftaNum: 0, note:"" },
+      "2206.00":{ mfn:"各国異なる", mfnNum: 5, fta:"段階的削減", ftaNum: 2, note:"" },
+      "1904.20":{ mfn:"5.8%", mfnNum: 5.8, fta:"無税", ftaNum: 0, note:"" },
+      "2106.90":{ mfn:"9%", mfnNum: 9, fta:"段階的削減", ftaNum: 4, note:"" },
+      "2102.20":{ mfn:"無税", mfnNum: 0, fta:"無税", ftaNum: 0, note:"" },
+      "2103.90":{ mfn:"7.7%", mfnNum: 7.7, fta:"段階的削減", ftaNum: 3, note:"" },
+      "1104.29":{ mfn:"各種", mfnNum: 4, fta:"段階的削減", ftaNum: 2, note:"" },
+      "3507.90":{ mfn:"無税", mfnNum: 0, fta:"無税", ftaNum: 0, note:"" },
+    },
+    customsBrokerFee: 200, docs:[
+      { name:"EUR.1 or 自己証明", required: false, desc:"EPA特恵適用時。REX自己申告可" },
+      { name:"衛生証明書", required: true, desc:"保健所発行" },
+      { name:"COA", required: true, desc:"" },
+      { name:"EU栄養表示ラベル", required: true, desc:"Reg 1169/2011" },
+      { name:"Commercial Invoice", required: true, desc:"" },
+      { name:"Packing List", required: true, desc:"" },
+      { name:"B/L or AWB", required: true, desc:"" },
+    ],
+    labeling:[
+      { item:"栄養成分表示", format:"100gあたり。kJ/kcal", mandatory: true },
+      { item:"原材料リスト", format:"重量順。アレルゲン14品目太字", mandatory: true },
+      { item:"Net Quantity", format:"メトリックのみ", mandatory: true },
+      { item:"原産国", format:"加盟国公用語", mandatory: true },
+      { item:"EU責任者情報", format:"輸入者名・住所", mandatory: true },
+      { item:"賞味期限", format:"DD/MM/YYYY", mandatory: true },
+      { item:"ロット番号", format:"L+番号", mandatory: true },
+    ],
+  },
+  {
+    id:"uk", name:"英国", flag:"🇬🇧",
+    fta:"日英CEPA / CPTPP（選択適用可）",
+    ftaNote:"CEPA+CPTPP二重FTA。BTOM完全施行済み。",
+    currency:"GBP", exchangeRate: 190,
+    tariffs:{
+      "1702.90":{ mfn:"0.4£/kg", mfnNum: 5, fta:"無税", ftaNum: 0, note:"" },
+      "2202.10":{ mfn:"9.6%", mfnNum: 9.6, fta:"無税", ftaNum: 0, note:"" },
+      "2202.99":{ mfn:"9.6%", mfnNum: 9.6, fta:"無税", ftaNum: 0, note:"" },
+      "2206.00":{ mfn:"各種", mfnNum: 5, fta:"段階的削減", ftaNum: 2, note:"" },
+      "1904.20":{ mfn:"5.8%", mfnNum: 5.8, fta:"無税", ftaNum: 0, note:"" },
+      "2106.90":{ mfn:"9%", mfnNum: 9, fta:"段階的削減", ftaNum: 4, note:"" },
+      "2102.20":{ mfn:"無税", mfnNum: 0, fta:"無税", ftaNum: 0, note:"" },
+      "2103.90":{ mfn:"7.7%", mfnNum: 7.7, fta:"段階的削減", ftaNum: 3, note:"" },
+      "1104.29":{ mfn:"各種", mfnNum: 4, fta:"段階的削減", ftaNum: 2, note:"" },
+      "3507.90":{ mfn:"無税", mfnNum: 0, fta:"無税", ftaNum: 0, note:"" },
+    },
+    customsBrokerFee: 180, docs:[
+      { name:"原産地証明（自己申告）", required: false, desc:"CEPA or CPTPP選択" },
+      { name:"IPAFFS事前届出", required: true, desc:"全食品輸入必須" },
+      { name:"衛生証明書", required: true, desc:"BCP検査対象" },
+      { name:"S&S申告書", required: true, desc:"安全保障申告" },
+      { name:"UK栄養表示ラベル", required: true, desc:"EU準拠" },
+      { name:"COA", required: true, desc:"" },
+      { name:"Commercial Invoice", required: true, desc:"" },
+      { name:"Packing List", required: true, desc:"" },
+    ],
+    labeling:[
+      { item:"栄養成分表示", format:"100gあたり。EU同等", mandatory: true },
+      { item:"原材料リスト", format:"英語。アレルゲン14品目太字", mandatory: true },
+      { item:"原産国", format:"\"Made in Japan\"", mandatory: true },
+      { item:"UK責任者情報", format:"英国内事業者", mandatory: true },
+      { item:"Traffic Light表示", format:"脂質・糖類等の色分け", mandatory: false },
+    ],
+  },
+  {
+    id:"rcep", name:"RCEP", flag:"🌏",
+    fta:"RCEP",
+    ftaNote:"段階的関税削減進行中。国ごとに異なる。",
+    currency:"USD", exchangeRate: 150,
+    tariffs:{
+      "1702.90":{ mfn:"各国異なる", mfnNum: 8, fta:"段階的削減", ftaNum: 4, note:"" },
+      "2202.10":{ mfn:"各国異なる", mfnNum: 10, fta:"段階的削減", ftaNum: 5, note:"" },
+      "2202.99":{ mfn:"各国異なる", mfnNum: 10, fta:"段階的削減", ftaNum: 5, note:"" },
+      "2206.00":{ mfn:"各国異なる", mfnNum: 15, fta:"一部除外", ftaNum: 10, note:"" },
+      "1904.20":{ mfn:"各国異なる", mfnNum: 8, fta:"段階的削減", ftaNum: 3, note:"" },
+      "2106.90":{ mfn:"各国異なる", mfnNum: 12, fta:"段階的削減", ftaNum: 6, note:"" },
+      "2102.20":{ mfn:"各国異なる", mfnNum: 5, fta:"段階的削減", ftaNum: 2, note:"" },
+      "2103.90":{ mfn:"各国異なる", mfnNum: 10, fta:"段階的削減", ftaNum: 5, note:"" },
+      "1104.29":{ mfn:"各国異なる", mfnNum: 8, fta:"段階的削減", ftaNum: 4, note:"" },
+      "3507.90":{ mfn:"各国異なる", mfnNum: 3, fta:"段階的削減", ftaNum: 1, note:"" },
+    },
+    customsBrokerFee: 200, docs:[
+      { name:"RCEP原産地証明書", required: false, desc:"第三者証明or認定輸出者自己証明" },
+      { name:"衛生証明書", required: true, desc:"国により異なる" },
+      { name:"Halal認証", required: false, desc:"マレーシア・インドネシア向け" },
+      { name:"COA", required: true, desc:"" },
+      { name:"Commercial Invoice", required: true, desc:"" },
+      { name:"Packing List", required: true, desc:"" },
+      { name:"B/L or AWB", required: true, desc:"" },
+    ],
+    labeling:[
+      { item:"栄養成分表示", format:"国ごとに異なる", mandatory: true },
+      { item:"原材料リスト", format:"現地語表示が必要な国が多い", mandatory: true },
+      { item:"原産国", format:"各国公用語", mandatory: true },
+      { item:"輸入者情報", format:"現地輸入者の情報", mandatory: true },
+    ],
+  },
+];
+
+// ============================================================
+// DATA: COMPLIANCE TIMELINES (days before shipment)
+// ============================================================
+const TIMELINES = {
+  us: [
+    { day: -120, task: "FDA食品施設登録の確認・更新", category: "fda", tip: "2年ごとの更新。偶数年10-12月が更新期間。初回は最初の出荷前に完了必須。", link: "https://www.fda.gov/food/registration-food-facilities" },
+    { day: -90, task: "米国側Customs Brokerの選定・契約", category: "broker", tip: "ディストリビューターが手配済みなら不要。自社手配の場合はNCBFAA会員から選定。" },
+    { day: -90, task: "FSVP体制構築（米国側インポーター）", category: "fda", tip: "輸入者がFSVP Planを作成。オリゼ側はHACCP文書・COA・製造記録を提供。" },
+    { day: -60, task: "ラベルデザイン最終版の作成", category: "label", tip: "本ツールのFDAラベル生成器で原稿を作成→デザイナーに渡す。" },
+    { day: -45, task: "成分分析証明書（COA）の取得", category: "qa", tip: "公的検査機関でアレルゲン・重金属・微生物検査。結果に2-3週間。" },
+    { day: -30, task: "Commercial Invoice / Packing List 作成", category: "doc", tip: "本ツールの書類作成機能で自動生成。FOB価格はUSD建て。" },
+    { day: -14, task: "フォワーダーにブッキング依頼", category: "logistics", tip: "海上：リードタイム約3週間（日本→西海岸）。航空：3-5日。" },
+    { day: -5, task: "Prior Notice 提出", category: "fda", tip: "FDA到着72時間前（船便は5日前推奨）。米国側Broker or Agent経由で提出。" },
+    { day: -3, task: "最終書類セットをBrokerに送付", category: "doc", tip: "CI・PL・B/L（ドラフト）・COA・原産地証明書（該当時）をまとめて送付。" },
+    { day: 0, task: "🚢 出荷", category: "ship", tip: "" },
+    { day: 21, task: "米国到着・通関", category: "customs", tip: "BrokerがCBPにフォーマルエントリー提出。Section 122 10%サーチャージ支払い。" },
+    { day: 28, task: "FDA検査（ランダム）", category: "fda", tip: "抜き打ち検査の可能性。ラベル不適合・書類不備は即Detention（留置）。" },
+  ],
+  eu: [
+    { day: -90, task: "REX自己証明の準備", category: "fta", tip: "€6,000以下は任意輸出者が自己申告可。超える場合は認定輸出者登録が必要。" },
+    { day: -60, task: "EU栄養表示ラベル作成", category: "label", tip: "100gあたり表示。kJ/kcal併記。加盟国の公用語で表示（英・独・仏等）。" },
+    { day: -45, task: "衛生証明書の取得", category: "qa", tip: "管轄保健所に申請。発行まで1-2週間。" },
+    { day: -45, task: "COA取得", category: "qa", tip: "" },
+    { day: -30, task: "Commercial Invoice / Packing List 作成", category: "doc", tip: "EUR建て。EPA原産地申告文をInvoiceに記載。" },
+    { day: -14, task: "フォワーダーにブッキング", category: "logistics", tip: "海上：約4-5週間。" },
+    { day: 0, task: "🚢 出荷", category: "ship", tip: "" },
+    { day: 35, task: "EU到着・通関", category: "customs", tip: "EPA適用でほぼ無税。通関は通常1-3日。" },
+  ],
+  uk: [
+    { day: -90, task: "IPAFFS事前届出の準備", category: "btom", tip: "全食品輸入にIPAFFS登録必須。英国側インポーターが手続き。" },
+    { day: -60, task: "UK栄養表示ラベル作成", category: "label", tip: "EU準拠。Traffic Light表示は推奨だが義務ではない。" },
+    { day: -45, task: "衛生証明書 / COA取得", category: "qa", tip: "BCPでのリスクベース検査に備える。" },
+    { day: -30, task: "S&S申告書の準備", category: "btom", tip: "安全保障申告。2025年1月31日より全面施行。" },
+    { day: -30, task: "書類作成", category: "doc", tip: "CEPA or CPTPP原産地申告文を含める。" },
+    { day: -14, task: "フォワーダーにブッキング", category: "logistics", tip: "" },
+    { day: 0, task: "🚢 出荷", category: "ship", tip: "" },
+    { day: 30, task: "UK到着・BCP検査・通関", category: "customs", tip: "BTOM下でBCPリスクベース検査。CEPA/CPTPP有利な方を適用。" },
+  ],
+};
+
+// ============================================================
+// DATA: ORIGIN RULES
+// ============================================================
+const ORIGIN_RULES = {
+  epa: { name: "日EU EPA", rule: "CTH（4桁関税番号変更）又はRVC40%以上", threshold: 40 },
+  cepa: { name: "日英CEPA", rule: "CTH又はRVC40%以上", threshold: 40 },
+  cptpp: { name: "CPTPP", rule: "CTH又はRVC45%以上", threshold: 45 },
+  rcep: { name: "RCEP", rule: "CTH又はRVC40%以上", threshold: 40 },
+};
+
+// ============================================================
+// DATA: DECISION TREE
+// ============================================================
+const DECISION_QUESTIONS = [
+  { id: "form", question: "製品の形態は？", options: [
+    { label: "液体（飲料）", value: "liquid_drink" }, { label: "液体（調味料・シロップ）", value: "liquid_seasoning" },
+    { label: "粉末・顆粒", value: "powder" }, { label: "ペースト・半固体", value: "paste" },
+    { label: "固体（バー・スナック等）", value: "solid" }, { label: "カプセル・錠剤", value: "capsule" },
+  ]},
+  { id: "alcohol", question: "アルコール分は？", condition: (a) => a.form === "liquid_drink", options: [
+    { label: "0.5%vol以下", value: "low" }, { label: "0.5%vol超", value: "high" },
+  ]},
+  { id: "carbonation", question: "炭酸は？", condition: (a) => a.form === "liquid_drink" && a.alcohol === "low", options: [
+    { label: "あり（炭酸入り）", value: "yes" }, { label: "なし", value: "no" },
+  ]},
+  { id: "primary_function", question: "主な用途は？", condition: (a) => ["liquid_seasoning", "powder", "paste"].includes(a.form), options: [
+    { label: "甘味料・砂糖代替", value: "sweetener" }, { label: "調味料（塩麹・醤油麹等）", value: "seasoning" },
+    { label: "食品素材・原料（BtoB）", value: "ingredient" }, { label: "機能性食品", value: "functional" },
+  ]},
+];
+
+// ============================================================
+// SHIPPER DEFAULT
+// ============================================================
+const SHIPPER = {
+  name: "株式会社オリゼ / ORYZAE Inc.",
+  address: "〒321-8505 栃木県宇都宮市",
+  addressEn: "Utsunomiya, Tochigi 321-8505, Japan",
+  tel: "+81-28-XXX-XXXX",
+  fda_registration: "XXXXXXXXXX",
+};
+
+// ============================================================
+
+const DEFAULT_SETTINGS = {
+  fx: { usd: 150, eur: 162, gbp: 190 },
+  freight: { seaPerUnit: 0.5, airPerUnit: 2.5 },
+  insurance: 0.5,
+  brokerFee: { us: 250, eu: 200, uk: 180, rcep: 200 },
+  mpfRate: 0.3464, mpfMin: 31.67, mpfMax: 614.35,
+  hmfRate: 0.125,
+};
+
+// ============================================================
+// HELPERS
+// ============================================================
+const fmt = (n, d = 0) => n?.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) ?? "—";
+const fmtJPY = (n) => "¥" + fmt(Math.round(n));
+const fmtUSD = (n) => "$" + fmt(n, 2);
+
+// ============================================================
+// DESIGN TOKENS (Desktop)
+// ============================================================
+const C = {
+  amber: "#C8850A", amberLight: "#FFF9ED", amberBorder: "#F0D38A",
+  red: "#C53030", green: "#276749", greenBg: "#F0FFF4", greenBorder: "#C6F6D5",
+  blue: "#2B6CB0", blueBg: "#EBF8FF", blueBorder: "#BEE3F8",
+  gray: "#718096", grayLight: "#F7FAFC", border: "#E2E8F0", bg: "#F7F6F3", white: "#fff",
+  sidebar: "#1A1814", sidebarHover: "#2D2A22", sidebarActive: "#3D3826",
+  text: "#2D3748", textLight: "#718096", textMuted: "#A0AEC0",
+};
+
+const font = "'Hiragino Kaku Gothic ProN', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif";
+
+// ============================================================
+// UI PRIMITIVES (Desktop)
+// ============================================================
+const Pill = ({ children, color = "#744210", bg = C.amberLight, border = C.amberBorder, style = {} }) => (
+  <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: "99px", fontSize: "12px", fontWeight: 600, color, background: bg, border: `1px solid ${border}`, whiteSpace: "nowrap", ...style }}>{children}</span>
+);
+
+const Tip = ({ children }) => (
+  <div style={{ background: "#FFFFF0", border: "1px solid #FEFCBF", borderLeft: "3px solid #D69E2E", borderRadius: "6px", padding: "10px 14px", fontSize: "13px", color: "#744210", lineHeight: 1.6, marginTop: "8px" }}>
+    💡 {children}
+  </div>
+);
+
+const Card = ({ children, style = {} }) => (
+  <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "20px", marginBottom: "14px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", ...style }}>{children}</div>
+);
+
+const Label = ({ children }) => (
+  <div style={{ fontSize: "13px", fontWeight: 700, color: C.text, marginBottom: "6px", letterSpacing: "0.01em" }}>{children}</div>
+);
+
+const SectionHeader = ({ children, sub }) => (
+  <div style={{ marginBottom: "16px" }}>
+    <div style={{ fontSize: "20px", fontWeight: 800, color: C.text, letterSpacing: "-0.02em" }}>{children}</div>
+    {sub && <div style={{ fontSize: "13px", color: C.textLight, marginTop: "2px" }}>{sub}</div>}
+  </div>
+);
+
+const Select = ({ value, onChange, options, placeholder }) => (
+  <select value={value} onChange={(e) => onChange(e.target.value)} style={{ padding: "10px 14px", border: `1px solid ${C.border}`, borderRadius: "8px", fontSize: "14px", background: C.white, width: "100%", boxSizing: "border-box", color: C.text, cursor: "pointer" }}>
+    {placeholder && <option value="">{placeholder}</option>}
+    {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+  </select>
+);
+
+const Input = ({ value, onChange, placeholder, type = "text", style = {} }) => (
+  <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+    style={{ padding: "10px 14px", border: `1px solid ${C.border}`, borderRadius: "8px", fontSize: "14px", width: "100%", boxSizing: "border-box", background: C.white, color: C.text, ...style }} />
+);
+
+const Btn = ({ children, onClick, primary, small, style = {} }) => (
+  <button onClick={onClick} style={{ padding: small ? "6px 14px" : "10px 20px", border: primary ? "none" : `1px solid ${C.border}`, borderRadius: "8px", background: primary ? C.amber : C.white, color: primary ? "#fff" : C.text, fontSize: small ? "12px" : "14px", fontWeight: 600, cursor: "pointer", transition: "all 0.15s", ...style }}>{children}</button>
+);
+
+const CountryTabs = ({ selected, onSelect }) => (
+  <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+    {COUNTRIES.map((c) => (
+      <button key={c.id} onClick={() => onSelect(c.id)} style={{ padding: "8px 16px", border: selected === c.id ? `2px solid ${C.amber}` : `1px solid ${C.border}`, borderRadius: "8px", background: selected === c.id ? C.amberLight : C.white, cursor: "pointer", fontSize: "13px", fontWeight: selected === c.id ? 700 : 500, color: selected === c.id ? "#744210" : C.text, transition: "all 0.15s" }}>{c.flag} {c.name}</button>
+    ))}
+  </div>
+);
+
+const TwoCol = ({ left, right, ratio = "1fr 1fr" }) => {
+  // Parse ratio to get relative sizing hints
+  const parts = ratio.split(/\s+/);
+  const parseW = (s) => {
+    if (s.endsWith("px")) return { flex: `0 1 ${s}`, minWidth: "0" };
+    if (s === "1fr") return { flex: "1 1 260px", minWidth: "0" };
+    return { flex: "1 1 260px", minWidth: "0" };
+  };
+  const ls = parseW(parts[0] || "1fr");
+  const rs = parseW(parts[1] || "1fr");
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "20px" }}>
+      <div style={ls}>{left}</div>
+      <div style={rs}>{right}</div>
+    </div>
+  );
+};
+
+const AlertBanner = ({ alert, expanded, onToggle }) => {
+  const colors = { critical: { bg: "#FFF5F5", border: "#FED7D7", text: "#9B2C2C", icon: "🔴" }, warning: { bg: C.amberLight, border: C.amberBorder, text: "#744210", icon: "🟡" }, info: { bg: C.blueBg, border: C.blueBorder, text: C.blue, icon: "🔵" } };
+  const cl = colors[alert.severity] || colors.info;
+  return (
+    <div style={{ background: cl.bg, border: `1px solid ${cl.border}`, borderRadius: "8px", padding: "12px 16px", marginBottom: "8px", cursor: "pointer", transition: "box-shadow 0.15s" }} onClick={onToggle}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: "14px", fontWeight: 700, color: cl.text }}>{cl.icon} {alert.title}</div>
+        <span style={{ fontSize: "12px", color: C.textMuted }}>{expanded ? "▲" : "▼"}</span>
+      </div>
+      <div style={{ fontSize: "13px", color: cl.text, opacity: 0.85, marginTop: "4px" }}>{alert.summary}</div>
+      {expanded && <div style={{ fontSize: "13px", color: cl.text, opacity: 0.75, marginTop: "8px", lineHeight: 1.6, borderTop: `1px solid ${cl.border}`, paddingTop: "8px" }}>{alert.detail}<div style={{ fontSize: "12px", color: C.textMuted, marginTop: "6px" }}>最終確認: {alert.lastVerified}</div></div>}
+    </div>
+  );
+};
+
+// ============================================================
+// FDA LABEL GENERATOR
+// ============================================================
+const FDALabelGenerator = ({ products = PRODUCT_DATABASE, initialProduct = "" }) => {
+  const [productId, setProductId] = useState(initialProduct);
+  const [customNutrition, setCustomNutrition] = useState(null);
+  useEffect(() => { setProductId(initialProduct); }, [initialProduct]);
+  const product = products.find((p) => p.id === productId);
+  const n = customNutrition || product?.nutrition;
+  const productsWithNutrition = products.filter((p) => p.nutrition);
+
+  const NutritionPanel = ({ n }) => (
+    <div style={{ border: "2px solid #000", padding: "6px", fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif", maxWidth: "320px", background: "#fff" }}>
+      <div style={{ fontSize: "32px", fontWeight: 900, lineHeight: 1 }}>Nutrition Facts</div>
+      <div style={{ borderBottom: "1px solid #000", paddingBottom: "3px", marginBottom: "3px" }}>
+        <div style={{ fontSize: "13px" }}>{n.servingsPerContainer} servings per container</div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "15px", fontWeight: 700 }}>
+          <span>Serving size</span><span>{n.servingSize}</span>
+        </div>
+      </div>
+      <div style={{ borderBottom: "8px solid #000", paddingBottom: "3px" }}>
+        <div style={{ fontSize: "12px", fontWeight: 700 }}>Amount per serving</div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <span style={{ fontSize: "26px", fontWeight: 900 }}>Calories</span>
+          <span style={{ fontSize: "26px", fontWeight: 900 }}>{n.calories}</span>
+        </div>
+      </div>
+      <div style={{ borderBottom: "1px solid #000", textAlign: "right", fontSize: "11px", fontWeight: 700, padding: "3px 0" }}>% Daily Value*</div>
+      {[
+        { label: "Total Fat", value: `${n.totalFat}g`, dv: Math.round((n.totalFat / 78) * 100), bold: true },
+        { label: "  Saturated Fat", value: `${n.saturatedFat}g`, dv: Math.round((n.saturatedFat / 20) * 100) },
+        { label: "  Trans Fat", value: `${n.transFat}g`, dv: null },
+        { label: "Cholesterol", value: `${n.cholesterol}mg`, dv: Math.round((n.cholesterol / 300) * 100), bold: true },
+        { label: "Sodium", value: `${n.sodium}mg`, dv: Math.round((n.sodium / 2300) * 100), bold: true },
+        { label: "Total Carbohydrate", value: `${n.totalCarb}g`, dv: Math.round((n.totalCarb / 275) * 100), bold: true },
+        { label: "  Dietary Fiber", value: `${n.dietaryFiber}g`, dv: Math.round((n.dietaryFiber / 28) * 100) },
+        { label: "  Total Sugars", value: `${n.totalSugars}g`, dv: null },
+        { label: "    Incl. Added Sugars", value: `${n.addedSugars}g`, dv: Math.round((n.addedSugars / 50) * 100) },
+        { label: "Protein", value: `${n.protein}g`, dv: Math.round((n.protein / 50) * 100), bold: true },
+      ].map((row, i) => (
+        <div key={i} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #ddd", padding: "2px 0", fontSize: "12px" }}>
+          <span><span style={{ fontWeight: row.bold ? 700 : 400 }}>{row.label}</span> {row.value}</span>
+          {row.dv !== null && <span style={{ fontWeight: 700 }}>{row.dv}%</span>}
+        </div>
+      ))}
+      <div style={{ borderTop: "4px solid #000", paddingTop: "3px", marginTop: "3px" }}>
+        {[
+          { label: "Vitamin D", value: `${n.vitD}mcg`, dv: Math.round((n.vitD / 20) * 100) },
+          { label: "Calcium", value: `${n.calcium}mg`, dv: Math.round((n.calcium / 1300) * 100) },
+          { label: "Iron", value: `${n.iron}mg`, dv: Math.round((n.iron / 18) * 100) },
+          { label: "Potassium", value: `${n.potassium}mg`, dv: Math.round((n.potassium / 4700) * 100) },
+        ].map((row, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #ddd", padding: "2px 0", fontSize: "12px" }}>
+            <span>{row.label} {row.value}</span><span style={{ fontWeight: 700 }}>{row.dv}%</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: "10px", lineHeight: 1.3, marginTop: "4px" }}>* The % Daily Value (DV) tells you how much a nutrient in a serving of food contributes to a daily diet. 2,000 calories a day is used for general nutrition advice.</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <SectionHeader sub="FDA 21 CFR 101準拠のラベル原稿を自動生成">🏷️ FDAラベル生成器</SectionHeader>
+      <div style={{ maxWidth: "400px", marginBottom: "16px" }}>
+        <Select value={productId} onChange={setProductId} placeholder="製品を選択..." options={productsWithNutrition.map((p) => ({ value: p.id, label: `${p.name} (${p.nameEn})` }))} />
+      </div>
+      {n && product && (
+        <>
+        <div style={{ marginBottom: "10px" }}><Btn small onClick={() => { var np=document.querySelector("[data-fda-label]"); if(!np)return; var lbl="<html><head><style>body{font-family:Arial,sans-serif;padding:20px;max-width:400px;margin:0 auto}</style></head><body>"+np.innerHTML+"</body></html>"; var blob=new Blob([lbl],{type:"text/html"}); var u=URL.createObjectURL(blob); var a=document.createElement("a"); a.href=u; a.download="FDA_Label.html"; a.click(); URL.revokeObjectURL(u); }}>🖨️ ラベルを印刷</Btn></div>
+        <TwoCol ratio="340px 1fr"
+          left={<Card data-fda-label="1"><Label>📐 NUTRITION FACTS PANEL</Label><NutritionPanel n={n} /></Card>}
+          right={
+            <div>
+              <Card>
+                <Label>📝 INGREDIENT LIST</Label>
+                <div style={{ fontSize: "14px", lineHeight: 1.7, padding: "12px", background: "#FAFAF5", borderRadius: "6px", fontFamily: "Georgia, serif" }}>
+                  <strong>INGREDIENTS:</strong> {n.ingredients}
+                </div>
+              </Card>
+              <Card>
+                <Label>⚠️ ALLERGEN STATEMENT</Label>
+                <div style={{ fontSize: "14px", lineHeight: 1.7, padding: "12px", background: n.allergens.length > 0 ? "#FFF5F5" : "#FAFAF5", borderRadius: "6px" }}>
+                  {n.allergens.length > 0 ? <><strong>Contains: {n.allergens.map((a) => a.charAt(0).toUpperCase() + a.slice(1)).join(", ")}.</strong><br />{n.allergenNote}</> : <>{n.allergenNote}</>}
+                </div>
+              </Card>
+              <Card>
+                <Label>📦 NET WEIGHT / COUNTRY OF ORIGIN</Label>
+                <div style={{ fontSize: "14px", lineHeight: 2 }}>
+                  <div><strong>Net Wt:</strong> {n.netWeight}</div>
+                  <div><strong>Product of Japan</strong></div>
+                  <div style={{ fontSize: "13px", color: C.textLight }}>Distributed by: [US Distributor Name & Address]</div>
+                </div>
+              </Card>
+              <Card style={{ background: C.greenBg, border: `1px solid ${C.greenBorder}` }}>
+                <Label>✅ ラベルチェックリスト</Label>
+                <div style={{ fontSize: "13px", color: C.green, lineHeight: 2 }}>
+                  {["Nutrition Facts パネル（FDA 21 CFR 101準拠）", "Ingredient List（重量順・英語一般名称）", "Allergen Statement（9大アレルゲン + ゴマ）", "Net Weight（メトリック + US慣用単位）", "Country of Origin", "Manufacturer or Distributor 情報", "UPC バーコード（小売向け）"].map((item, i) => <div key={i}>☐ {item}</div>)}
+                </div>
+              </Card>
+            </div>
+          }
+        />
+        </>
+      )}
+    </div>
+  );
+};
+
+// ============================================================
+// LANDED COST CALCULATOR
+// ============================================================
+const LandedCostCalc = ({ settings = DEFAULT_SETTINGS, products = PRODUCT_DATABASE, initialProduct = "", initialCountry = "us" }) => {
+  const [productId, setProductId] = useState(initialProduct);
+  const [countryId, setCountryId] = useState(initialCountry);
+  useEffect(() => { setProductId(initialProduct); }, [initialProduct]);
+  useEffect(() => { setCountryId(initialCountry); }, [initialCountry]);
+  const [fobJPY, setFobJPY] = useState("");
+  const [qty, setQty] = useState("");
+  const [shipping, setShipping] = useState("sea");
+  const [retailPrice, setRetailPrice] = useState("");
+
+  const product = products.find((p) => p.id === productId);
+  const country = COUNTRIES.find((c) => c.id === countryId);
+  const tariff = product && country ? country.tariffs[product.hsCode] : null;
+
+  const calc = useMemo(() => {
+    if (!fobJPY || !qty || !tariff || !country) return null;
+    const fobUnit = parseFloat(fobJPY);
+    const units = parseInt(qty);
+    const fxKey = country.currency === "EUR" ? "eur" : country.currency === "GBP" ? "gbp" : "usd";
+    const rate = settings.fx[fxKey] || country.exchangeRate || 150;
+    const fobUSD = fobUnit / rate;
+    const fobTotal = fobUSD * units;
+    const freightPerUnit = shipping === "sea" ? settings.freight.seaPerUnit : settings.freight.airPerUnit;
+    const freightTotal = freightPerUnit * units;
+    const insuranceRate = settings.insurance / 100;
+    const insurance = fobTotal * insuranceRate;
+    const cifTotal = fobTotal + freightTotal + insurance;
+    let dutyRate = 0;
+    if (countryId === "us") { dutyRate = (tariff.mfnNum || 0) + (country.section122?.rateNum || 0); }
+    else { dutyRate = tariff.ftaNum ?? tariff.mfnNum ?? 0; }
+    const dutyAmount = cifTotal * (dutyRate / 100);
+    const brokerFee = settings.brokerFee[countryId] || country.customsBrokerFee || 200;
+    const mpf = countryId === "us" ? Math.min(Math.max(cifTotal * (settings.mpfRate / 100), settings.mpfMin), settings.mpfMax) : 0;
+    const hmf = countryId === "us" && shipping === "sea" ? cifTotal * (settings.hmfRate / 100) : 0;
+    const totalLanded = cifTotal + dutyAmount + brokerFee + mpf + hmf;
+    const landedPerUnit = totalLanded / units;
+    const retail = retailPrice ? parseFloat(retailPrice) : null;
+    const margin = retail ? ((retail - landedPerUnit) / retail) * 100 : null;
+    return { fobUSD, fobTotal, freightTotal, insurance, cifTotal, dutyRate, dutyAmount, brokerFee, mpf, hmf, totalLanded, landedPerUnit, margin, rate, units };
+  }, [fobJPY, qty, tariff, country, countryId, shipping, retailPrice, settings]);
+
+  return (
+    <div>
+      <SectionHeader sub="FOB → 着荷原価を自動試算。⚙️設定タブで運賃・為替を変更可能。">💵 Landed Cost 計算機</SectionHeader>
+      <TwoCol ratio="380px 1fr"
+        left={
+          <Card>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div><Label>製品</Label><Select value={productId} onChange={setProductId} placeholder="選択..." options={products.map((p) => ({ value: p.id, label: p.name }))} /></div>
+              <div><Label>仕向国</Label><CountryTabs selected={countryId} onSelect={setCountryId} /></div>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <div style={{ flex: 1 }}><Label>FOB単価（円）</Label><Input value={fobJPY} onChange={setFobJPY} placeholder="例: 300" type="number" /></div>
+                <div style={{ flex: 1 }}><Label>数量（個）</Label><Input value={qty} onChange={setQty} placeholder="例: 1000" type="number" /></div>
+              </div>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <div style={{ flex: 1 }}><Label>輸送方法</Label><Select value={shipping} onChange={setShipping} options={[{ value: "sea", label: "🚢 海上" }, { value: "air", label: "✈️ 航空" }]} /></div>
+                <div style={{ flex: 1 }}><Label>想定小売価格（USD等）</Label><Input value={retailPrice} onChange={setRetailPrice} placeholder="例: 4.99" type="number" /></div>
+              </div>
+            </div>
+          </Card>
+        }
+        right={calc ? (
+          <div>
+            <Card style={{ background: "#FAFAF5" }}>
+              <Label>📊 コスト内訳（為替: ¥{calc.rate}/{country.currency}）</Label>
+              <div style={{ fontSize: "14px", lineHeight: 2.2 }}>
+                {[
+                  ["FOB単価", fmtUSD(calc.fobUSD) + `/個 × ${calc.units}個`, fmtUSD(calc.fobTotal)],
+                  [`運賃（${shipping === "sea" ? "海上" : "航空"}）`, `${fmtUSD(shipping === "sea" ? settings.freight.seaPerUnit : settings.freight.airPerUnit)}/個`, fmtUSD(calc.freightTotal)],
+                  [`保険料（${settings.insurance}%）`, "", fmtUSD(calc.insurance)],
+                  ["CIF合計", "", fmtUSD(calc.cifTotal)],
+                ].map(([l, d, v], i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", borderBottom: i === 3 ? "2px solid #333" : `1px solid ${C.border}`, paddingBottom: "2px" }}>
+                    <span>{l} <span style={{ color: C.textMuted, fontSize: "12px" }}>{d}</span></span>
+                    <span style={{ fontWeight: i === 3 ? 700 : 400, fontFamily: "monospace" }}>{v}</span>
+                  </div>
+                ))}
+                <div style={{ marginTop: "6px" }}>
+                  {[
+                    [`関税（実効 ${calc.dutyRate.toFixed(1)}%）`, fmtUSD(calc.dutyAmount)],
+                    ["通関手数料（Broker Fee）", fmtUSD(calc.brokerFee)],
+                    ...(countryId === "us" ? [["MPF（Merchandise Processing Fee）", fmtUSD(calc.mpf)], ...(shipping === "sea" ? [["HMF（Harbor Maintenance Fee）", fmtUSD(calc.hmf)]] : [])] : []),
+                  ].map(([l, v], i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: "2px" }}>
+                      <span>{l}</span><span style={{ fontFamily: "monospace" }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+            <Card style={{ background: C.amberLight, border: `1px solid ${C.amberBorder}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", fontWeight: 700 }}>
+                <span>Landed Cost 合計</span><span>{fmtUSD(calc.totalLanded)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "22px", fontWeight: 800, color: C.amber, marginTop: "6px" }}>
+                <span>単価（着地）</span><span>{fmtUSD(calc.landedPerUnit)} / 個</span>
+              </div>
+              <div style={{ fontSize: "13px", color: "#744210", marginTop: "4px" }}>
+                FOB {fmtJPY(parseFloat(fobJPY))} → 着地 {fmtJPY(calc.landedPerUnit * calc.rate)}（{((calc.landedPerUnit / calc.fobUSD - 1) * 100).toFixed(1)}% 増）
+              </div>
+            </Card>
+            {calc.margin !== null && (
+              <Card style={{ background: calc.margin > 50 ? C.greenBg : calc.margin > 30 ? C.amberLight : "#FFF5F5", border: `1px solid ${calc.margin > 50 ? C.greenBorder : calc.margin > 30 ? C.amberBorder : "#FED7D7"}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "18px", fontWeight: 700, color: calc.margin > 50 ? C.green : calc.margin > 30 ? "#744210" : C.red }}>
+                  <span>粗利率</span><span>{calc.margin.toFixed(1)}%</span>
+                </div>
+                <div style={{ fontSize: "13px", color: C.textLight, marginTop: "2px" }}>
+                  {calc.margin > 50 ? "✅ 健全" : calc.margin > 30 ? "🟡 許容範囲" : "🔴 要見直し"}
+                  （小売 {fmtUSD(parseFloat(retailPrice))} − 着地 {fmtUSD(calc.landedPerUnit)} = 利益 {fmtUSD(parseFloat(retailPrice) - calc.landedPerUnit)}）
+                </div>
+              </Card>
+            )}
+          </div>
+        ) : (
+          <Card style={{ background: C.grayLight, textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: "14px", color: C.textMuted }}>← 左のフォームに入力するとコスト内訳が表示されます</div>
+          </Card>
+        )}
+      />
+    </div>
+  );
+};
+
+// ============================================================
+// DOCUMENT GENERATOR
+// ============================================================
+const DocGenerator = ({ settings = DEFAULT_SETTINGS, products = PRODUCT_DATABASE, initialProduct = "", initialCountry = "us" }) => {
+  const [productId, setProductId] = useState(initialProduct);
+  const [countryId, setCountryId] = useState(initialCountry);
+  useEffect(() => { setProductId(initialProduct); }, [initialProduct]);
+  useEffect(() => { setCountryId(initialCountry); }, [initialCountry]);
+  const [consignee, setConsignee] = useState("");
+  const [fob, setFob] = useState("");
+  const [qty, setQty] = useState("");
+  const [shipping, setShipping] = useState("sea");
+  const [invoiceNo, setInvoiceNo] = useState(`ORZ-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, "0")}-001`);
+  const [generated, setGenerated] = useState(null);
+
+  const product = products.find((p) => p.id === productId);
+  const country = COUNTRIES.find((c) => c.id === countryId);
+
+  const generate = () => {
+    if (!product || !country) return;
+    const today = new Date().toISOString().split("T")[0];
+    const fobVal = parseFloat(fob) || 0;
+    const qtyVal = parseInt(qty) || 0;
+    const total = fobVal * qtyVal;
+    const fxKey = country.currency === "EUR" ? "eur" : country.currency === "GBP" ? "gbp" : "usd";
+    const rate = settings.fx[fxKey] || country.exchangeRate || 150;
+
+    const ci = `COMMERCIAL INVOICE
+═══════════════════════════════════════
+Invoice No: ${invoiceNo}
+Date: ${today}
+Terms: FOB Japan
+
+SHIPPER / EXPORTER:
+${SHIPPER.name}
+${SHIPPER.addressEn}
+Tel: ${SHIPPER.tel}
+
+CONSIGNEE:
+${consignee || "[Consignee Name & Address]"}
+
+NOTIFY PARTY:
+Same as Consignee
+
+COUNTRY OF ORIGIN: Japan
+COUNTRY OF DESTINATION: ${country.name}
+───────────────────────────────────────
+DESCRIPTION OF GOODS:
+${product.nameEn}
+HS Code: ${product.hsCode}
+${countryId === "us" ? `HTS-US: ${product.htsUs}` : ""}
+
+Quantity: ${fmt(qtyVal)} units
+Unit Price: ${(fobVal / rate).toFixed(4)} ${country.currency} (FOB)
+Total: ${(total / rate).toFixed(2)} ${country.currency}
+(JPY ${fmt(total)})
+───────────────────────────────────────
+TOTAL INVOICE VALUE: ${(total / rate).toFixed(2)} ${country.currency}
+
+${countryId === "eu" ? `\nORIGIN DECLARATION (EPA):\nThe exporter of the products covered by this document declares that, except where otherwise clearly indicated, these products are of Japanese preferential origin.\n` : ""}${countryId === "uk" ? `\nORIGIN DECLARATION (CEPA/CPTPP):\nThe exporter of the products covered by this document declares that these products are of Japanese preferential origin under the Japan-UK CEPA / CPTPP.\n` : ""}
+Authorized Signature: ____________________
+Name: 
+Date: ${today}`;
+
+    const pl = `PACKING LIST
+═══════════════════════════════════════
+Invoice No: ${invoiceNo}
+Date: ${today}
+
+SHIPPER: ${SHIPPER.name}
+CONSIGNEE: ${consignee || "[Consignee Name & Address]"}
+───────────────────────────────────────
+Item: ${product.nameEn}
+HS Code: ${product.hsCode}
+Quantity: ${fmt(qtyVal)} units
+Net Weight: ${product.nutrition ? `${((product.nutrition.netWeightG * qtyVal) / 1000).toFixed(1)} kg` : "[___] kg"}
+Gross Weight: [___] kg
+Dimensions: [___] cm × [___] cm × [___] cm
+No. of Cartons: [___]
+───────────────────────────────────────
+MARKS & NUMBERS:
+${invoiceNo}
+Made in Japan
+${product.nameEn}
+${country.name}`;
+
+    const pn = countryId === "us" ? `PRIOR NOTICE DATA (FDA)
+═══════════════════════════════════════
+※ 以下の情報をBroker or US Agentに送付してください
+
+Article Name: ${product.nameEn}
+FDA Product Code: [確認要 - Brokerが特定]
+Country of Production: Japan
+Manufacturer: ${SHIPPER.name}
+FDA Registration #: ${SHIPPER.fda_registration}
+Shipper: ${SHIPPER.name}
+Consignee (US): ${consignee || "[Consignee]"}
+Carrier: [Carrier Name]
+Mode of Transport: ${shipping === "air" ? "Air" : "Ocean"}
+Bill of Lading: [B/L Number]
+Estimated Arrival: [Date]
+Estimated Arrival Port: [Port Name]
+───────────────────────────────────────
+⚠️ 提出期限: 到着72時間前（船便は5日前推奨）
+⚠️ 提出者: 米国側 Broker or US Agent` : null;
+
+    setGenerated({ ci, pl, pn });
+  };
+
+  const DocDisplay = ({ title, content }) => {
+    const dl = () => { const b=new Blob([content],{type:"text/plain;charset=utf-8"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=title.replace(/[^a-zA-Z0-9_]/g,"_")+".txt";a.click();URL.revokeObjectURL(u); };
+    return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "6px" }}>
+        <Label>{title}</Label>
+        <div style={{ display: "flex", gap: "6px" }}>
+          <Btn small onClick={() => { try { navigator.clipboard?.writeText(content); } catch(e) {} }}>📋 コピー</Btn>
+          <Btn small onClick={dl}>⬇️ ダウンロード</Btn>
+        </div>
+      </div>
+      <pre style={{ fontSize: "12px", lineHeight: 1.7, background: "#FDFCF9", color: "#2D3748", padding: "24px", borderRadius: "8px", border: "1px solid #E2E8F0", overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: "450px", boxShadow: "inset 0 1px 3px rgba(0,0,0,0.04)" }}>{content}</pre>
+    </Card>
+  );
+  };
+
+  return (
+    <div>
+      <SectionHeader sub="CI・PL・Prior Noticeを自動生成。そのままBrokerに送付可能。">📄 書類オートフィル</SectionHeader>
+      <TwoCol ratio="380px 1fr"
+        left={
+          <Card>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div><Label>製品</Label><Select value={productId} onChange={setProductId} placeholder="選択..." options={products.map((p) => ({ value: p.id, label: p.name }))} /></div>
+              <div><Label>仕向国</Label><CountryTabs selected={countryId} onSelect={setCountryId} /></div>
+              <div><Label>Invoice No.</Label><Input value={invoiceNo} onChange={setInvoiceNo} /></div>
+              <div><Label>Consignee（荷受人）</Label><Input value={consignee} onChange={setConsignee} placeholder="会社名・住所" /></div>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <div style={{ flex: 1 }}><Label>FOB単価（¥）</Label><Input value={fob} onChange={setFob} type="number" placeholder="300" /></div>
+                <div style={{ flex: 1 }}><Label>数量</Label><Input value={qty} onChange={setQty} type="number" placeholder="1000" /></div>
+              </div>
+              <div><Label>輸送方法</Label><Select value={shipping} onChange={setShipping} options={[{ value: "sea", label: "🚢 海上" }, { value: "air", label: "✈️ 航空" }]} /></div>
+              <Btn primary onClick={generate}>📄 書類を生成</Btn>
+            </div>
+          </Card>
+        }
+        right={generated ? (
+          <div>
+            {[{ title: "📄 Commercial Invoice", content: generated.ci }, { title: "📦 Packing List", content: generated.pl }, ...(generated.pn ? [{ title: "🇺🇸 Prior Notice Data (FDA)", content: generated.pn }] : [])].map((doc, i) => (
+              <DocDisplay key={i} title={doc.title} content={doc.content} />
+            ))}
+          </div>
+        ) : (
+          <Card style={{ background: C.grayLight, textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: "14px", color: C.textMuted }}>← 入力して「書類を生成」を押すと表示されます</div>
+          </Card>
+        )}
+      />
+    </div>
+  );
+};
+
+// ============================================================
+// ORIGIN DETERMINATION
+// ============================================================
+const OriginDetermination = ({ products = PRODUCT_DATABASE, initialProduct = "" }) => {
+  const [productId, setProductId] = useState(initialProduct);
+  useEffect(() => { setProductId(initialProduct); }, [initialProduct]);
+  const product = products.find((p) => p.id === productId);
+
+  const calcRVC = (materials) => {
+    if (!materials) return null;
+    const totalMaterialValue = materials.reduce((s, m) => s + m.value, 0);
+    const fobEstimate = totalMaterialValue * 2.5;
+    const nonOriginValue = materials.filter((m) => m.origin !== "JP").reduce((s, m) => s + m.value, 0);
+    const rvc = ((fobEstimate - nonOriginValue) / fobEstimate) * 100;
+    return { rvc, totalMaterialValue, fobEstimate, nonOriginValue };
+  };
+
+  const checkCTH = (materials, productHs) => {
+    if (!materials) return null;
+    const prodHead = productHs.substring(0, 4);
+    const nonOrigin = materials.filter((m) => m.origin !== "JP");
+    const allChanged = nonOrigin.every((m) => m.hsCode.substring(0, 4) !== prodHead);
+    return { passed: allChanged, nonOrigin, prodHead };
+  };
+
+  const rvcResult = product ? calcRVC(product.materials) : null;
+  const cthResult = product ? checkCTH(product.materials, product.hsCode) : null;
+
+  return (
+    <div>
+      <SectionHeader sub="EPA/CPTPP/RCEPの原産地基準充足を自動判定">🌾 原産地判定ワークシート</SectionHeader>
+      <div style={{ maxWidth: "400px", marginBottom: "16px" }}>
+        <Select value={productId} onChange={setProductId} placeholder="製品を選択..." options={products.filter((p) => p.materials).map((p) => ({ value: p.id, label: p.name }))} />
+      </div>
+      {product && product.materials && (
+        <TwoCol ratio="1fr 1fr"
+          left={
+            <div>
+              <Card>
+                <Label>📦 原材料構成（HS: {product.hsCode}）</Label>
+                <div style={{ fontSize: "13px" }}>
+                  {product.materials.map((m, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${C.border}` }}>
+                      <span>{m.origin === "JP" ? "🇯🇵" : "🌐"} {m.name} ({m.hsCode})</span>
+                      <span style={{ color: m.origin === "JP" ? C.green : C.red, fontWeight: 600 }}>{m.origin} — ¥{m.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+              <Card>
+                <Label>🔍 CTH判定（関税番号変更基準）</Label>
+                {cthResult && (
+                  <div>
+                    <div style={{ fontSize: "13px", lineHeight: 1.7 }}>
+                      製品HS上4桁: <strong>{cthResult.prodHead}</strong><br />
+                      非原産材料: {cthResult.nonOrigin.length === 0 ? "なし（全て日本原産）" : cthResult.nonOrigin.map((m) => `${m.name}(${m.hsCode.substring(0, 4)})`).join(", ")}
+                    </div>
+                    <div style={{ marginTop: "8px", padding: "10px", borderRadius: "6px", background: cthResult.passed ? C.greenBg : "#FFF5F5", border: `1px solid ${cthResult.passed ? C.greenBorder : "#FED7D7"}` }}>
+                      <span style={{ fontSize: "14px", fontWeight: 700, color: cthResult.passed ? C.green : C.red }}>{cthResult.passed ? "✅ CTH基準 充足" : "❌ CTH基準 不充足"}</span>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            </div>
+          }
+          right={
+            <div>
+              <Card>
+                <Label>📊 RVC判定（付加価値基準）</Label>
+                {rvcResult && (
+                  <div>
+                    <div style={{ fontSize: "13px", lineHeight: 2 }}>
+                      FOB推定額: ¥{rvcResult.fobEstimate}<br />
+                      非原産材料額: ¥{rvcResult.nonOriginValue}<br />
+                      <strong>RVC = {rvcResult.rvc.toFixed(1)}%</strong>
+                    </div>
+                    <div style={{ marginTop: "10px" }}>
+                      {Object.entries(ORIGIN_RULES).map(([key, rule]) => {
+                        const passed = rvcResult.rvc >= rule.threshold;
+                        return (
+                          <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", marginBottom: "6px", borderRadius: "6px", background: passed ? C.greenBg : "#FFF5F5", border: `1px solid ${passed ? C.greenBorder : "#FED7D7"}` }}>
+                            <span style={{ fontSize: "13px" }}>{rule.name}（{rule.threshold}%以上）</span>
+                            <span style={{ fontSize: "13px", fontWeight: 700, color: passed ? C.green : C.red }}>{passed ? "✅ 充足" : "❌ 不足"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </Card>
+              <Card style={{ background: C.blueBg, border: `1px solid ${C.blueBorder}` }}>
+                <Label>📋 総合判定</Label>
+                <div style={{ fontSize: "13px", lineHeight: 2, color: C.blue }}>
+                  {Object.entries(ORIGIN_RULES).map(([key, rule]) => {
+                    const rvcPass = rvcResult && rvcResult.rvc >= rule.threshold;
+                    const cthPass = cthResult?.passed;
+                    const eligible = rvcPass || cthPass;
+                    return <div key={key}>{eligible ? "✅" : "❌"} {rule.name}: {eligible ? "特恵税率適用可（" + (cthPass ? "CTH" : "RVC") + "基準充足）" : "特恵税率適用不可"}</div>;
+                  })}
+                </div>
+              </Card>
+            </div>
+          }
+        />
+      )}
+    </div>
+  );
+};
+
+// ============================================================
+// COMPLIANCE TIMELINE
+// ============================================================
+const ComplianceTimeline = ({ initialCountry = "us", checked = {}, onCheckedChange }) => {
+  const [countryId, setCountryId] = useState(initialCountry);
+  useEffect(() => { setCountryId(initialCountry); }, [initialCountry]);
+  const [shipDate, setShipDate] = useState("");
+  const setChecked = onCheckedChange || (() => {});
+
+  const timeline = TIMELINES[countryId] || [];
+  const catColors = { fda: "#E53935", broker: "#FF9800", label: "#9C27B0", qa: "#2196F3", doc: "#4CAF50", logistics: "#795548", ship: "#333", customs: "#607D8B", btom: "#00BCD4", fta: "#3F51B5" };
+
+  const getDate = (dayOffset) => {
+    if (!shipDate) return "—";
+    const d = new Date(shipDate);
+    d.setDate(d.getDate() + dayOffset);
+    return d.toLocaleDateString("ja-JP", { month: "short", day: "numeric" });
+  };
+
+  const completedCount = Object.values(checked).filter(Boolean).length;
+  const totalCount = timeline.length;
+  const progress = totalCount ? (completedCount / totalCount) * 100 : 0;
+
+  return (
+    <div>
+      <SectionHeader sub="出荷日から逆算でタスクを管理">⏱️ コンプライアンス・タイムライン</SectionHeader>
+      <TwoCol ratio="320px 1fr"
+        left={
+          <div>
+            <Card>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div><Label>仕向国</Label><CountryTabs selected={countryId} onSelect={(id) => { setCountryId(id); setChecked({}); }} /></div>
+                <div><Label>出荷予定日</Label><Input value={shipDate} onChange={setShipDate} type="date" /></div>
+              </div>
+            </Card>
+            {shipDate && (
+              <Card style={{ background: C.amberLight, border: `1px solid ${C.amberBorder}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "14px", fontWeight: 700 }}>進捗: {completedCount}/{totalCount}</span>
+                  <span style={{ fontSize: "13px", color: "#744210" }}>{progress.toFixed(0)}%</span>
+                </div>
+                <div style={{ height: "8px", background: "#FDE68A", borderRadius: "4px", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${progress}%`, background: C.amber, borderRadius: "4px", transition: "width 0.3s" }} />
+                </div>
+              </Card>
+            )}
+          </div>
+        }
+        right={shipDate ? (
+          <Card style={{ padding: "16px" }}>
+            {timeline.map((item, i) => {
+              const key = `${countryId}-${i}`;
+              const isShip = item.category === "ship";
+              return (
+                <div key={i} style={{ display: "flex", gap: "12px", marginBottom: "2px" }}>
+                  <div style={{ width: "60px", textAlign: "right", paddingTop: "12px", flexShrink: 0 }}>
+                    <div style={{ fontSize: "12px", color: C.textLight, fontWeight: 600 }}>{getDate(item.day)}</div>
+                    <div style={{ fontSize: "11px", color: C.textMuted }}>{item.day === 0 ? "出荷日" : `${Math.abs(item.day)}日${item.day < 0 ? "前" : "後"}`}</div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "18px" }}>
+                    <div style={{ width: "2px", flex: 1, background: i === 0 ? "transparent" : C.border }} />
+                    <div style={{ width: isShip ? "16px" : "12px", height: isShip ? "16px" : "12px", borderRadius: "50%", background: checked[key] ? C.green : (catColors[item.category] || C.gray), border: "2px solid #fff", boxShadow: `0 0 0 1px ${C.border}`, flexShrink: 0 }} />
+                    <div style={{ width: "2px", flex: 1, background: i === timeline.length - 1 ? "transparent" : C.border }} />
+                  </div>
+                  <div style={{ flex: 1, padding: "8px 14px", background: isShip ? "#1A1814" : checked[key] ? C.greenBg : C.white, border: `1px solid ${isShip ? "#333" : checked[key] ? C.greenBorder : C.border}`, borderRadius: "8px", marginBottom: "4px", cursor: isShip ? "default" : "pointer", opacity: checked[key] ? 0.7 : 1, transition: "all 0.15s" }}
+                    onClick={() => !isShip && setChecked((c) => ({ ...c, [key]: !c[key] }))}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: "13px", fontWeight: 600, color: isShip ? "#fff" : C.text, textDecoration: checked[key] ? "line-through" : "none" }}>{item.task}</span>
+                      {!isShip && <span style={{ fontSize: "16px" }}>{checked[key] ? "✅" : "☐"}</span>}
+                    </div>
+                    {item.tip && <div style={{ fontSize: "12px", color: isShip ? "#999" : C.textLight, marginTop: "3px", lineHeight: 1.5 }}>{item.tip}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+        ) : (
+          <Card style={{ background: C.grayLight, textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: "14px", color: C.textMuted }}>← 出荷予定日を設定するとタイムラインが表示されます</div>
+          </Card>
+        )}
+      />
+    </div>
+  );
+};
+
+// ============================================================
+// SETTINGS PANEL
+// ============================================================
+const SettingsPanel = ({ settings, onUpdate, apiKey = "", onApiKeyChange }) => {
+  const [pdfStatus, setPdfStatus] = useState(null);
+  const [pdfParsed, setPdfParsed] = useState(null);
+  const u = (path, val) => {
+    const s = JSON.parse(JSON.stringify(settings));
+    const keys = path.split(".");
+    let obj = s;
+    for (let i = 0; i < keys.length - 1; i++) obj = obj[keys[i]];
+    obj[keys[keys.length - 1]] = parseFloat(val) || 0;
+    onUpdate(s);
+  };
+  const SettingRow = ({ label, path, unit }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+      <div style={{ flex: 1, fontSize: "14px", color: C.text }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+        <input type="number" value={settings[path.split(".")[0]]?.[path.split(".")[1]] ?? path.split(".").reduce((o, k) => o?.[k], settings) ?? ""} onChange={(e) => u(path, e.target.value)} style={{ width: "100px", padding: "8px 10px", border: `1px solid ${C.border}`, borderRadius: "6px", fontSize: "14px", textAlign: "right", fontFamily: "monospace", color: C.text }} />
+        {unit && <span style={{ fontSize: "13px", color: C.textLight, minWidth: "30px" }}>{unit}</span>}
+      </div>
+    </div>
+  );
+  const SGroup = ({ title, children }) => (
+    <div style={{ marginBottom: "20px" }}>
+      <div style={{ fontSize: "14px", fontWeight: 700, color: "#744210", marginBottom: "10px", paddingBottom: "6px", borderBottom: `1px solid ${C.amberBorder}` }}>{title}</div>
+      {children}
+    </div>
+  );
+
+  const handlePdfUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfStatus("reading");
+    setPdfParsed(null);
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(",")[1]);
+        r.onerror = () => rej(new Error("ファイル読み込み失敗"));
+        r.readAsDataURL(file);
+      });
+      setPdfStatus("parsing");
+      const mimeType = file.type || "application/pdf";
+      if (!apiKey) { setPdfStatus("nokey"); return; }
+      const sysPrompt = `You extract freight/logistics cost data from shipping quotes and invoices. Return ONLY valid JSON (no markdown, no backticks, no preamble). Extract whatever you can find. Use this exact schema:
+{"sea_per_unit":null,"air_per_unit":null,"insurance_pct":null,"broker_fee_usd":null,"fx_usd":null,"fx_eur":null,"fx_gbp":null,"notes":"brief description of what was found"}
+Use null for values not found. For per-unit freight: divide total freight by quantity if both are present. All monetary values in USD. Insurance as percentage (e.g. 0.5 for 0.5%).`;
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: sysPrompt }] },
+          contents: [{ parts: [{ inlineData: { mimeType, data: base64 } }, { text: "この見積書/請求書から輸送コスト・為替レート等のデータを抽出してJSON形式で返してください。" }] }],
+        }),
+      });
+      const data = await resp.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      setPdfParsed(parsed);
+      setPdfStatus("done");
+    } catch (err) {
+      console.error(err);
+      setPdfStatus("error");
+    }
+  };
+
+  const applyParsed = () => {
+    if (!pdfParsed) return;
+    const s = JSON.parse(JSON.stringify(settings));
+    if (pdfParsed.sea_per_unit != null) s.freight.seaPerUnit = pdfParsed.sea_per_unit;
+    if (pdfParsed.air_per_unit != null) s.freight.airPerUnit = pdfParsed.air_per_unit;
+    if (pdfParsed.insurance_pct != null) s.insurance = pdfParsed.insurance_pct;
+    if (pdfParsed.broker_fee_usd != null) s.brokerFee.us = pdfParsed.broker_fee_usd;
+    if (pdfParsed.fx_usd != null) s.fx.usd = pdfParsed.fx_usd;
+    if (pdfParsed.fx_eur != null) s.fx.eur = pdfParsed.fx_eur;
+    if (pdfParsed.fx_gbp != null) s.fx.gbp = pdfParsed.fx_gbp;
+    onUpdate(s);
+    setPdfParsed(null);
+    setPdfStatus("applied");
+  };
+
+  return (
+    <div>
+      <SectionHeader sub="為替レート・輸送コスト・手数料をカスタマイズ。💵コスト / 📄書類タブに反映。">⚙️ コスト設定</SectionHeader>
+      <TwoCol ratio="1fr 1fr"
+        left={
+          <div>
+            <Card style={{ border: `2px dashed ${C.amberBorder}`, background: C.amberLight }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "8px", color: "#744210" }}>📎 見積書から自動読み込み</div>
+              <div style={{ fontSize: "13px", color: "#744210", marginBottom: "12px", lineHeight: 1.6 }}>フォワーダーの見積書PDF（または画像）をアップロードすると、AIが運賃・保険・手数料等を自動抽出します。</div>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "10px 20px", background: "#fff", border: `1.5px solid ${C.amberBorder}`, borderRadius: "8px", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "#744210" }}>
+                📄 ファイルを選択
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={handlePdfUpload} style={{ display: "none" }} />
+              </label>
+              <div style={{ fontSize: "12px", color: C.textMuted, marginTop: "6px" }}>PDF / PNG / JPG に対応</div>
+              {pdfStatus === "reading" && <div style={{ fontSize: "13px", color: C.amber, marginTop: "8px" }}>📄 ファイル読み込み中...</div>}
+              {pdfStatus === "parsing" && <div style={{ fontSize: "13px", color: C.amber, marginTop: "8px" }}>🤖 AI解析中...（10〜30秒）</div>}
+              {pdfStatus === "error" && <div style={{ fontSize: "13px", color: C.red, marginTop: "8px" }}>❌ 読み取り失敗。別のファイルを試してください。</div>}
+              {pdfStatus === "nokey" && <div style={{ fontSize: "13px", color: C.red, marginTop: "8px" }}>🔑 APIキーが未設定です。下の「🔑 API設定」セクションにGemini APIキーを入力してください。</div>}
+              {pdfStatus === "applied" && <div style={{ fontSize: "13px", color: C.green, marginTop: "8px" }}>✅ 設定に反映しました</div>}
+              {pdfParsed && pdfStatus === "done" && (
+                <div style={{ marginTop: "12px", padding: "14px", background: C.white, borderRadius: "8px", border: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, marginBottom: "8px" }}>🔍 抽出結果：</div>
+                  <div style={{ fontSize: "13px", lineHeight: 2, fontFamily: "monospace" }}>
+                    {pdfParsed.sea_per_unit != null && <div>海上運賃/個: <strong>${pdfParsed.sea_per_unit}</strong></div>}
+                    {pdfParsed.air_per_unit != null && <div>航空運賃/個: <strong>${pdfParsed.air_per_unit}</strong></div>}
+                    {pdfParsed.insurance_pct != null && <div>保険料率: <strong>{pdfParsed.insurance_pct}%</strong></div>}
+                    {pdfParsed.broker_fee_usd != null && <div>通関手数料: <strong>${pdfParsed.broker_fee_usd}</strong></div>}
+                    {pdfParsed.fx_usd != null && <div>USD/JPY: <strong>¥{pdfParsed.fx_usd}</strong></div>}
+                    {pdfParsed.fx_eur != null && <div>EUR/JPY: <strong>¥{pdfParsed.fx_eur}</strong></div>}
+                    {pdfParsed.fx_gbp != null && <div>GBP/JPY: <strong>¥{pdfParsed.fx_gbp}</strong></div>}
+                    {pdfParsed.notes && <div style={{ color: C.textLight, fontFamily: font, marginTop: "4px" }}>💡 {pdfParsed.notes}</div>}
+                  </div>
+                  <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+                    <Btn primary small onClick={applyParsed}>✅ 設定に反映</Btn>
+                    <Btn small onClick={() => { setPdfParsed(null); setPdfStatus(null); }}>キャンセル</Btn>
+                  </div>
+                </div>
+              )}
+            </Card>
+          </div>
+        }
+        right={
+          <Card>
+            <SGroup title="💱 為替レート（1通貨あたり円）">
+              <SettingRow label="USD/JPY" path="fx.usd" unit="円" />
+              <SettingRow label="EUR/JPY" path="fx.eur" unit="円" />
+              <SettingRow label="GBP/JPY" path="fx.gbp" unit="円" />
+            </SGroup>
+            <SGroup title="🚢 輸送コスト（1個あたりUSD）">
+              <SettingRow label="海上運賃" path="freight.seaPerUnit" unit="USD" />
+              <SettingRow label="航空運賃" path="freight.airPerUnit" unit="USD" />
+            </SGroup>
+            <SGroup title="📋 保険・手数料">
+              <SettingRow label="保険料率" path="insurance" unit="%" />
+              <SettingRow label="Broker手数料（US）" path="brokerFee.us" unit="USD" />
+              <SettingRow label="Broker手数料（EU）" path="brokerFee.eu" unit="USD" />
+              <SettingRow label="Broker手数料（UK）" path="brokerFee.uk" unit="USD" />
+            </SGroup>
+            <SGroup title="🇺🇸 米国固有手数料">
+              <SettingRow label="MPF率" path="mpfRate" unit="%" />
+              <SettingRow label="MPF下限" path="mpfMin" unit="USD" />
+              <SettingRow label="MPF上限" path="mpfMax" unit="USD" />
+              <SettingRow label="HMF率（海上のみ）" path="hmfRate" unit="%" />
+            </SGroup>
+            <div style={{ textAlign: "right" }}>
+              <Btn small onClick={() => onUpdate(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)))} style={{ color: C.textMuted, fontSize: "12px" }}>🔄 初期値に戻す</Btn>
+            </div>
+          </Card>
+        }
+      />
+      <Card style={{ marginTop: "8px" }}>
+        <div style={{ fontSize: "14px", fontWeight: 700, color: "#744210", marginBottom: "10px", paddingBottom: "6px", borderBottom: `1px solid ${C.amberBorder}` }}>🔑 API設定（AI機能用）</div>
+        <div style={{ fontSize: "13px", color: C.textLight, marginBottom: "10px", lineHeight: 1.6 }}>
+          見積書PDF自動読み込み・スペックシート自動入力などのAI機能を使うにはGemini APIキーが必要です。キーはブラウザのメモリにのみ保持され、外部に送信されません（Google Gemini API以外）。
+        </div>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <input type="password" value={apiKey} onChange={e => onApiKeyChange?.(e.target.value)} placeholder="AIza..." style={{ flex: 1, padding: "10px 14px", border: `1px solid ${C.border}`, borderRadius: "8px", fontSize: "13px", fontFamily: "monospace", background: C.white }} />
+          {apiKey && <span style={{ fontSize: "13px", color: C.green, fontWeight: 600 }}>✅ 設定済み</span>}
+        </div>
+        <div style={{ fontSize: "11px", color: C.textMuted, marginTop: "6px" }}>aistudio.google.com → 「Get API key」で無料取得できます。ページを閉じるとキーは消去されます。</div>
+      </Card>
+    </div>
+  );
+};
+
+// ============================================================
+// PRODUCT CARD
+// ============================================================
+const ProductCard = ({ product, expanded, onToggle, onSelectCountry }) => {
+  const [showAlts, setShowAlts] = useState(false);
+  const lk = { high: { color: C.red, bg: "#FFF5F5", label: "高" }, mid: { color: C.amber, bg: C.amberLight, label: "中" }, low: { color: C.gray, bg: C.grayLight, label: "低" } };
+  return (
+    <div style={{ border: expanded ? `2px solid ${C.amber}` : `1px solid ${C.border}`, borderRadius: "10px", overflow: "hidden", background: C.white, marginBottom: "10px", boxShadow: expanded ? "0 2px 8px rgba(0,0,0,0.06)" : "none" }}>
+      <div onClick={onToggle} style={{ padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: "15px", fontWeight: 700, color: C.text }}>{product.name}</div>
+          <div style={{ fontSize: "13px", color: C.textLight }}>{product.nameEn}</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: "16px", color: C.amber }}>{product.hsCode}</div>
+          <div style={{ fontSize: "11px", color: C.textMuted }}>HTS: {product.htsUs}</div>
+        </div>
+      </div>
+      {expanded && (
+        <div style={{ padding: "0 18px 14px", borderTop: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: "13px", color: C.textLight, lineHeight: 1.6, margin: "10px 0" }}>{product.description}</div>
+          {product.notes && <Tip>{product.notes}</Tip>}
+          {product.factors?.length > 0 && (
+            <div style={{ marginTop: "8px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 700, color: C.textLight, marginBottom: "4px" }}>分類に影響する要素:</div>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>{product.factors.map((f, i) => <Pill key={i} color={C.blue} bg={C.blueBg} border={C.blueBorder}>{f}</Pill>)}</div>
+            </div>
+          )}
+          {product.alternatives?.length > 0 && (
+            <div style={{ marginTop: "10px" }}>
+              <button onClick={(e) => { e.stopPropagation(); setShowAlts(!showAlts); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "13px", color: C.amber, fontWeight: 600 }}>{showAlts ? "▲ 代替分類を閉じる" : "▼ 代替分類を見る"}</button>
+              {showAlts && product.alternatives.map((alt, i) => {
+                const s = lk[alt.likelihood] || lk.low;
+                return (
+                  <div key={i} style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: "6px", marginTop: "6px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: "14px" }}>{alt.hsCode}</span>
+                      <Pill color={s.color} bg={s.bg} border="transparent">可能性: {s.label}</Pill>
+                    </div>
+                    <div style={{ fontSize: "12px", color: C.textLight, marginTop: "2px" }}>{alt.name} — {alt.condition}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: "8px", marginTop: "12px", flexWrap: "wrap" }}>
+            {COUNTRIES.map((c) => <Btn key={c.id} small onClick={(e) => { e.stopPropagation(); onSelectCountry(c.id); }}>{c.flag} {c.name}の関税</Btn>)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================
+// GUIDE SECTION
+// ============================================================
+const GuidePanel = ({ guideOpen, setGuideOpen }) => {
+  const gs = (k) => guideOpen[k];
+  const gt = (k) => setGuideOpen(g => ({ ...g, [k]: !g[k] }));
+  const Warn = ({children}) => <div style={{ background: "#FFF5F5", border: "1px solid #FED7D7", borderLeft: "4px solid #C53030", borderRadius: "6px", padding: "10px 14px", fontSize: "13px", color: "#9B2C2C", lineHeight: 1.6, margin: "8px 0" }}>⚠️ {children}</div>;
+  const GSection = ({id, icon, title, children}) => (
+    <Card style={{ cursor: "pointer", overflow: "hidden" }}>
+      <div onClick={() => gt(id)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: "15px", fontWeight: 700, color: C.text }}>{icon} {title}</div>
+        <span style={{ fontSize: "18px", color: C.textMuted, transform: gs(id) ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
+      </div>
+      {gs(id) && <div style={{ marginTop: "14px", borderTop: `1px solid ${C.border}`, paddingTop: "14px" }}>{children}</div>}
+    </Card>
+  );
+  const GTable = ({headers, rows}) => (
+    <div style={{ overflowX: "auto" }}>
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", margin: "10px 0" }}>
+      <thead><tr>{headers.map((h,i) => <th key={i} style={{ background: "#F5ECD7", border: "1px solid #D4A843", padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#4A3500", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+      <tbody>{rows.map((row,i) => <tr key={i}>{row.map((c,j) => <td key={j} style={{ border: `1px solid ${C.border}`, padding: "7px 10px", lineHeight: 1.5 }}>{c}</td>)}</tr>)}</tbody>
+    </table>
+    </div>
+  );
+  const Step = ({n, title, desc}) => (
+    <div style={{ margin: "8px 0 8px 4px" }}>
+      <div style={{ fontSize: "13px" }}><span style={{ fontWeight: 700, color: C.amber }}>Step {n}:</span> <strong>{title}</strong></div>
+      <div style={{ fontSize: "13px", color: C.textLight, marginLeft: "8px", lineHeight: 1.6 }}>{desc}</div>
+    </div>
+  );
+  const P = ({children, bold}) => <div style={{ fontSize: "13px", color: C.text, lineHeight: 1.7, margin: "6px 0", fontWeight: bold ? 700 : 400 }}>{children}</div>;
+
+  return (
+    <div>
+      <SectionHeader sub="各セクションをクリックで展開">📖 操作マニュアル</SectionHeader>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "0 16px" }}>
+        <div>
+          <GSection id="overview" icon="🚀" title="このツールでできること">
+            <P>輸出に必要な通関・コンプライアンス業務の約80%を社内で完結。</P>
+            <P bold>社内で完結：</P><P>HS番号特定、関税率確認、FDAラベル原稿、ランデッドコスト試算、CI/PL/Prior Notice自動生成、FTA適格性判定、スケジュール管理</P>
+            <P bold>外部必須（20%）：</P>
+            <GTable headers={["業務","専門家"]} rows={[["米国税関への輸入申告","US Licensed Customs Broker"],["FDA施設登録・FSVP","FDA規制コンサルタント"],["日本側輸出通関","日本側通関業者/フォワーダー"]]} />
+          </GSection>
+          <GSection id="g_class" icon="🔍" title="HS分類の使い方">
+            <Step n={1} title="商品を検索" desc="検索バーに商品名を入力。部分一致で候補表示。" />
+            <Step n={2} title="商品カードを確認" desc="推奨HS番号、HTS番号、分類根拠を確認。" />
+            <Step n={3} title="代替分類を確認" desc="カード展開で代替HS番号を確認。" />
+            <Warn>HS番号の最終確定は通関業者の業務。ツールの結果は事前調査。</Warn>
+          </GSection>
+          <GSection id="g_tariff" icon="💰" title="関税率の使い方">
+            <P>国別タブを切り替えて確認。米国は MFN基本税率 + Section 122 10% の2層構造。</P>
+            <Tip>EU・UK向けはEPA/CEPAにより多くの品目で関税0%。</Tip>
+          </GSection>
+          <GSection id="g_fda" icon="🏷️" title="FDAラベルの使い方">
+            <Step n={1} title="商品選択" desc="ドロップダウンで選択。" />
+            <Step n={2} title="確認" desc="Nutrition Facts、原材料、アレルゲン、内容量が自動表示。" />
+            <Step n={3} title="コピー" desc="テキストをコピーしてデザイナーへ送付。" />
+            <Warn>ラベル最終校正はFDA規制コンサルタントに依頼。</Warn>
+          </GSection>
+          <GSection id="g_cost" icon="💵" title="ランデッドコストの使い方">
+            <Step n={1} title="商品・仕向国選択" desc="左パネルで選択。" />
+            <Step n={2} title="FOB・数量入力" desc="右パネルにコスト内訳とマージンが自動表示。" />
+            <P bold>色の意味：</P><P>🟢 緑=粗利50%以上 / 🟡 黄=30〜50% / 🔴 赤=30%未満</P>
+            <Tip>⚙️設定タブで運賃・為替をカスタマイズ可能。</Tip>
+          </GSection>
+          <GSection id="g_settings" icon="⚙️" title="コスト設定の使い方">
+            <P bold>PDF自動読み込み：</P>
+            <Step n={1} title="PDFアップロード" desc="フォワーダーの見積書を「ファイル選択」からアップロード。" />
+            <Step n={2} title="AI抽出確認" desc="運賃・保険・手数料等が自動抽出（10〜30秒）。" />
+            <Step n={3} title="設定に反映" desc="「設定に反映」で一括適用。" />
+            <P bold>手動設定：</P><P>各数値を直接編集可能。「初期値に戻す」でリセット。</P>
+          </GSection>
+        </div>
+        <div>
+          <GSection id="g_doc" icon="📄" title="書類自動作成の使い方">
+            <P>CI / PL / Prior Noticeを自動生成。コピーしてExcelやメールに貼り付け。</P>
+            <Warn>生成書類はドラフト。最終版は通関業者確認・署名の上で使用。</Warn>
+          </GSection>
+          <GSection id="g_origin" icon="🌾" title="原産地判定の使い方">
+            <P>CTH（関税番号変更基準）とRVC（付加価値基準）の2基準で判定。</P>
+            <GTable headers={["FTA","RVC閾値"]} rows={[["日EU・EPA","40%以上"],["日英CEPA","40%以上"],["CPTPP","45%以上"],["RCEP","40%以上"]]} />
+            <Tip>オリゼ製品はほぼ全原材料が国産のためRVC 90〜100%で全FTAクリア。</Tip>
+          </GSection>
+          <GSection id="g_timeline" icon="⏱️" title="タイムラインの使い方">
+            <P>出荷日を設定→各タスク期日が自動計算→チェックで進捗管理。</P>
+            <Warn>初回出荷は-120日前から準備。2回目以降は-60日からで可。</Warn>
+          </GSection>
+          <GSection id="g_experts" icon="🤝" title="外部専門家への依頼">
+            <GTable headers={["専門家","依頼内容"]} rows={[["US Customs Broker","Formal Entry、Sec122支払、ボンド手配"],["FDAコンサル","FDA施設登録、FSVP、ラベル校正"],["日本通関業者","輸出通関申告"],["フォワーダー","国際輸送手配、B/L発行"]]} />
+            <Tip>初回出荷時の専門家選定がボトルネック。-90日前に着手。</Tip>
+          </GSection>
+          <GSection id="g_glossary" icon="📚" title="用語集">
+            <GTable headers={["用語","意味"]} rows={[["HS番号","国際統一商品分類番号（6桁共通）"],["HTS番号","米国独自10桁分類"],["MFN","最恵国待遇税率"],["FTA/EPA","自由貿易/経済連携協定"],["FOB","日本港船積みまでの価格"],["CIF","FOB+運賃+保険"],["ランデッドコスト","CIF+関税+諸手数料"],["Section 122","米国IEEPA全輸入品追加関税"],["Prior Notice","FDA事前通告"],["FSVP","外国供給者検証プログラム"],["CTH","関税番号変更基準"],["RVC","付加価値基準"],["MPF","商品処理手数料"],["HMF","港湾維持手数料"]]} />
+          </GSection>
+          <GSection id="g_quick" icon="⚡" title="KOJIPOP米国初回クイックスタート">
+            <P bold>Phase 1（-120〜-90日）</P>
+            <P>① FDA施設登録確認 ② 米国Broker選定 ③ HS番号事前確認（HTS 2202.99.9000）</P>
+            <P bold>Phase 2（-90〜-30日）</P>
+            <P>④ FDAラベル原稿 → デザイナー ⑤ FDAコンサル校正 ⑥ ランデッドコスト検証 ⑦ 原産地判定</P>
+            <P bold>Phase 3（-30〜0日）</P>
+            <P>⑧ CI/PL作成 → Broker送付 ⑨ 輸送手配 ⑩ Prior Noticeデータ送付 ⑪ COA取得</P>
+            <P bold>Phase 4（出荷後）</P>
+            <P>⑫ 米国到着・Formal Entry ⑬ FDA検査対応 ⑭ 関税支払い ⑮ 配送完了</P>
+          </GSection>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+// PRODUCT MANAGER
+// ============================================================
+const EMPTY_PRODUCT = { id: "", name: "", nameEn: "", hsCode: "", htsUs: "", description: "", notes: "", tags: [], examples: [], factors: [], alternatives: [], thresholds: [], nutrition: null, materials: [] };
+
+const NUTRITION_FIELDS = [
+  { key: "servingsPerContainer", label: "Servings per Container", type: "number", placeholder: "12" },
+  { key: "servingSize", label: "Serving Size", type: "text", placeholder: "1 can (355ml)" },
+  { key: "calories", label: "Calories", type: "number" },
+  { key: "totalFat", label: "Total Fat (g)", type: "number" },
+  { key: "saturatedFat", label: "Saturated Fat (g)", type: "number" },
+  { key: "transFat", label: "Trans Fat (g)", type: "number" },
+  { key: "cholesterol", label: "Cholesterol (mg)", type: "number" },
+  { key: "sodium", label: "Sodium (mg)", type: "number" },
+  { key: "totalCarb", label: "Total Carbohydrate (g)", type: "number" },
+  { key: "dietaryFiber", label: "Dietary Fiber (g)", type: "number" },
+  { key: "totalSugars", label: "Total Sugars (g)", type: "number" },
+  { key: "addedSugars", label: "Added Sugars (g)", type: "number" },
+  { key: "protein", label: "Protein (g)", type: "number" },
+  { key: "vitD", label: "Vitamin D (mcg)", type: "number" },
+  { key: "calcium", label: "Calcium (mg)", type: "number" },
+  { key: "iron", label: "Iron (mg)", type: "number" },
+  { key: "potassium", label: "Potassium (mg)", type: "number" },
+  { key: "ingredients", label: "Ingredients (English)", type: "textarea", placeholder: "RICE KOJI (RICE, ASPERGILLUS ORYZAE), WATER..." },
+  { key: "allergenNote", label: "Allergen Note", type: "text", placeholder: "Manufactured in a facility..." },
+  { key: "netWeight", label: "Net Weight", type: "text", placeholder: "12 fl oz (355ml)" },
+  { key: "netWeightG", label: "Net Weight (g)", type: "number", placeholder: "355" },
+];
+
+const ProductManager = ({ customProducts, onUpdate, builtIn = PRODUCT_DATABASE, apiKey = "" }) => {
+  const [editing, setEditing] = useState(null); // null = list view, "new" = new, id = edit
+  const [form, setForm] = useState(JSON.parse(JSON.stringify(EMPTY_PRODUCT)));
+  const [openSections, setOpenSections] = useState({ basic: true });
+  const [allergenInput, setAllergenInput] = useState("");
+  const [tagInput, setTagInput] = useState("");
+  const [pdfStatus, setPdfStatus] = useState(null);
+
+  const toggleSection = (s) => setOpenSections(o => ({ ...o, [s]: !o[s] }));
+  const uf = (key, val) => setForm(f => ({ ...f, [key]: val }));
+  const un = (key, val) => setForm(f => ({ ...f, nutrition: { ...(f.nutrition || {}), [key]: val } }));
+
+  const startNew = () => {
+    setForm(JSON.parse(JSON.stringify(EMPTY_PRODUCT)));
+    setAllergenInput("");
+    setTagInput("");
+    setEditing("new");
+    setOpenSections({ basic: true });
+  };
+
+  const startEdit = (p) => {
+    setForm(JSON.parse(JSON.stringify(p)));
+    setAllergenInput(p.nutrition?.allergens?.join(", ") || "");
+    setTagInput(p.tags?.join(", ") || "");
+    setEditing(p.id);
+    setOpenSections({ basic: true });
+  };
+
+  const save = () => {
+    const p = { ...form };
+    if (!p.name || !p.hsCode) return;
+    if (!p.id) p.id = "custom_" + Date.now();
+    p.tags = tagInput.split(",").map(t => t.trim()).filter(Boolean);
+    if (p.nutrition) {
+      p.nutrition.allergens = allergenInput.split(",").map(a => a.trim().toLowerCase()).filter(Boolean);
+    }
+    // Ensure numeric fields are numbers
+    if (p.nutrition) {
+      NUTRITION_FIELDS.forEach(f => {
+        if (f.type === "number" && p.nutrition[f.key] !== undefined) {
+          p.nutrition[f.key] = parseFloat(p.nutrition[f.key]) || 0;
+        }
+      });
+    }
+    const existing = customProducts.findIndex(cp => cp.id === p.id);
+    if (existing >= 0) {
+      const updated = [...customProducts];
+      updated[existing] = p;
+      onUpdate(updated);
+    } else {
+      onUpdate([...customProducts, p]);
+    }
+    setEditing(null);
+  };
+
+  const remove = (id) => { onUpdate(customProducts.filter(p => p.id !== id)); };
+
+  const addMaterial = () => {
+    setForm(f => ({ ...f, materials: [...(f.materials || []), { name: "", hsCode: "", origin: "JP", value: 0 }] }));
+  };
+  const updateMaterial = (idx, key, val) => {
+    setForm(f => {
+      const m = [...(f.materials || [])];
+      m[idx] = { ...m[idx], [key]: key === "value" ? (parseFloat(val) || 0) : val };
+      return { ...f, materials: m };
+    });
+  };
+  const removeMaterial = (idx) => {
+    setForm(f => ({ ...f, materials: (f.materials || []).filter((_, i) => i !== idx) }));
+  };
+
+  const handlePdfUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfStatus("parsing");
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(",")[1]);
+        r.onerror = () => rej(new Error("Read failed"));
+        r.readAsDataURL(file);
+      });
+      const mimeType = file.type || "application/pdf";
+      if (!apiKey) { setPdfStatus("nokey"); return; }
+      const sysPrompt = `Extract product data from this spec sheet/label. Return ONLY valid JSON with this schema:
+{"name":"日本語名","nameEn":"English name","hsCode":"XXXX.XX","htsUs":"XXXX.XX.XXXX","description":"説明","nutrition":{"servingsPerContainer":0,"servingSize":"","calories":0,"totalFat":0,"saturatedFat":0,"transFat":0,"cholesterol":0,"sodium":0,"totalCarb":0,"dietaryFiber":0,"totalSugars":0,"addedSugars":0,"protein":0,"vitD":0,"calcium":0,"iron":0,"potassium":0,"ingredients":"","allergens":["soy"],"allergenNote":"","netWeight":"","netWeightG":0}}
+Use null for nutrition if not found. Use empty string for missing text fields, 0 for missing numbers.`;
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: sysPrompt }] },
+          contents: [{ parts: [{ inlineData: { mimeType, data: base64 } }, { text: "この製品スペックシート/ラベルからデータを抽出してください。" }] }],
+        }),
+      });
+      const data = await resp.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+      setForm(f => ({
+        ...f,
+        name: parsed.name || f.name,
+        nameEn: parsed.nameEn || f.nameEn,
+        hsCode: parsed.hsCode || f.hsCode,
+        htsUs: parsed.htsUs || f.htsUs,
+        description: parsed.description || f.description,
+        nutrition: parsed.nutrition || f.nutrition,
+      }));
+      if (parsed.nutrition?.allergens) setAllergenInput(parsed.nutrition.allergens.join(", "));
+      setPdfStatus("done");
+    } catch (err) {
+      console.error(err);
+      setPdfStatus("error");
+    }
+  };
+
+  const Section = ({ id, title, children }) => (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: "8px", marginBottom: "10px", overflow: "hidden" }}>
+      <div onClick={() => toggleSection(id)} style={{ padding: "10px 14px", background: C.grayLight, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: "14px", fontWeight: 700, color: C.text }}>{title}</span>
+        <span style={{ color: C.textMuted }}>{openSections[id] ? "▲" : "▼"}</span>
+      </div>
+      {openSections[id] && <div style={{ padding: "14px" }}>{children}</div>}
+    </div>
+  );
+
+  const Field = ({ label, value, onChange, type = "text", placeholder = "", wide }) => (
+    <div style={{ marginBottom: "8px", flex: wide ? "1 1 100%" : "1 1 48%" }}>
+      <div style={{ fontSize: "12px", fontWeight: 600, color: C.textLight, marginBottom: "3px" }}>{label}</div>
+      {type === "textarea" ? (
+        <textarea value={value || ""} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={3} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${C.border}`, borderRadius: "6px", fontSize: "13px", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
+      ) : (
+        <input type={type} value={value ?? ""} onChange={e => onChange(type === "number" ? e.target.value : e.target.value)} placeholder={placeholder} style={{ width: "100%", padding: "8px 10px", border: `1px solid ${C.border}`, borderRadius: "6px", fontSize: "13px", boxSizing: "border-box" }} />
+      )}
+    </div>
+  );
+
+  // LIST VIEW
+  if (!editing) return (
+    <div>
+      <SectionHeader sub={`登録済み ${builtIn.length + customProducts.length}品目（プリセット${builtIn.length} + カスタム${customProducts.length}）`}>📦 製品管理</SectionHeader>
+      <div style={{ marginBottom: "16px" }}><Btn primary onClick={startNew}>＋ 新規製品を追加</Btn></div>
+      {customProducts.length > 0 && (
+        <div style={{ marginBottom: "20px" }}>
+          <Label>カスタム製品</Label>
+          {customProducts.map(p => (
+            <Card key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px" }}>
+              <div>
+                <div style={{ fontSize: "14px", fontWeight: 700 }}>{p.name} <span style={{ color: C.textLight, fontWeight: 400 }}>{p.nameEn}</span></div>
+                <div style={{ fontSize: "12px", color: C.textLight, fontFamily: "monospace" }}>HS: {p.hsCode} {p.htsUs ? `/ HTS: ${p.htsUs}` : ""}</div>
+                <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
+                  {p.nutrition && <Pill color={C.green} bg={C.greenBg} border={C.greenBorder}>FDA栄養✓</Pill>}
+                  {p.materials?.length > 0 && <Pill color={C.blue} bg={C.blueBg} border={C.blueBorder}>原材料✓</Pill>}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <Btn small onClick={() => startEdit(p)}>✏️ 編集</Btn>
+                <Btn small onClick={() => remove(p.id)} style={{ color: C.red }}>🗑️</Btn>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+      <Label>プリセット製品（読み取り専用）</Label>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "8px" }}>
+        {builtIn.map(p => (
+          <div key={p.id} style={{ padding: "10px 14px", border: `1px solid ${C.border}`, borderRadius: "8px", background: C.grayLight }}>
+            <div style={{ fontSize: "13px", fontWeight: 600 }}>{p.name}</div>
+            <div style={{ fontSize: "12px", color: C.textLight, fontFamily: "monospace" }}>{p.hsCode}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // EDIT / NEW VIEW
+  return (
+    <div>
+      <SectionHeader sub={editing === "new" ? "新規製品を登録" : `${form.name} を編集中`}>📦 {editing === "new" ? "製品追加" : "製品編集"}</SectionHeader>
+
+      {/* PDF Upload */}
+      <Card style={{ border: `2px dashed ${C.amberBorder}`, background: C.amberLight, marginBottom: "16px" }}>
+        <div style={{ fontSize: "14px", fontWeight: 700, color: "#744210", marginBottom: "6px" }}>📎 スペックシートから自動入力</div>
+        <div style={{ fontSize: "13px", color: "#744210", marginBottom: "10px" }}>製品仕様書やラベル画像をアップロードすると、AIが商品名・HS番号・栄養成分等を自動抽出してフォームに入力します。</div>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "8px 16px", background: "#fff", border: `1.5px solid ${C.amberBorder}`, borderRadius: "8px", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "#744210" }}>
+          📄 ファイルを選択
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={handlePdfUpload} style={{ display: "none" }} />
+        </label>
+        <span style={{ fontSize: "12px", color: C.textMuted, marginLeft: "8px" }}>PDF / PNG / JPG</span>
+        {pdfStatus === "parsing" && <div style={{ fontSize: "13px", color: C.amber, marginTop: "8px" }}>🤖 AI解析中...（10〜30秒）</div>}
+        {pdfStatus === "done" && <div style={{ fontSize: "13px", color: C.green, marginTop: "8px" }}>✅ フォームに反映しました。内容を確認・修正して保存してください。</div>}
+        {pdfStatus === "error" && <div style={{ fontSize: "13px", color: C.red, marginTop: "8px" }}>❌ 読み取り失敗。別のファイルを試してください。</div>}
+        {pdfStatus === "nokey" && <div style={{ fontSize: "13px", color: C.red, marginTop: "8px" }}>🔑 APIキーが未設定です。⚙️設定タブの「API設定」にGemini APIキーを入力してください。</div>}
+      </Card>
+
+      <TwoCol ratio="1fr 1fr"
+        left={
+          <div>
+            <Section id="basic" title="📋 基本情報（必須）">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0 12px" }}>
+                <Field label="商品名（日本語）" value={form.name} onChange={v => uf("name", v)} placeholder="KOJIPOP 発酵リカバリーソーダ" wide />
+                <Field label="商品名（英語）" value={form.nameEn} onChange={v => uf("nameEn", v)} placeholder="KOJIPOP Fermented Recovery Soda" wide />
+                <Field label="HS番号（6桁）" value={form.hsCode} onChange={v => uf("hsCode", v)} placeholder="2202.10" />
+                <Field label="HTS-US番号（10桁）" value={form.htsUs} onChange={v => uf("htsUs", v)} placeholder="2202.10.0000" />
+                <Field label="説明" value={form.description} onChange={v => uf("description", v)} type="textarea" placeholder="製品の概要説明" wide />
+                <Field label="注意事項" value={form.notes} onChange={v => uf("notes", v)} type="textarea" placeholder="分類上の留意点など" wide />
+                <Field label="タグ（カンマ区切り）" value={tagInput} onChange={setTagInput} placeholder="飲料, 炭酸, 発酵" wide />
+              </div>
+            </Section>
+
+            <Section id="materials" title="🌾 原材料構成（原産地判定用）">
+              <Tip>EPA/FTA特恵税率の適格性を判定するために使います。不要なら空欄でOK。</Tip>
+              {(form.materials || []).map((m, i) => (
+                <div key={i} style={{ display: "flex", gap: "6px", alignItems: "end", marginBottom: "6px", flexWrap: "wrap" }}>
+                  <Field label="原材料名" value={m.name} onChange={v => updateMaterial(i, "name", v)} placeholder="米麹" />
+                  <Field label="HS番号" value={m.hsCode} onChange={v => updateMaterial(i, "hsCode", v)} placeholder="1104.29" />
+                  <div style={{ marginBottom: "8px" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 600, color: C.textLight, marginBottom: "3px" }}>原産国</div>
+                    <select value={m.origin} onChange={e => updateMaterial(i, "origin", e.target.value)} style={{ padding: "8px", border: `1px solid ${C.border}`, borderRadius: "6px", fontSize: "13px" }}>
+                      <option value="JP">🇯🇵 JP</option><option value="CN">🇨🇳 CN</option><option value="TH">🇹🇭 TH</option><option value="US">🇺🇸 US</option><option value="other">🌐 Other</option>
+                    </select>
+                  </div>
+                  <Field label="金額(¥)" value={m.value} onChange={v => updateMaterial(i, "value", v)} type="number" placeholder="100" />
+                  <button onClick={() => removeMaterial(i)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "16px", color: C.red, marginBottom: "12px" }}>✕</button>
+                </div>
+              ))}
+              <Btn small onClick={addMaterial}>＋ 原材料を追加</Btn>
+            </Section>
+          </div>
+        }
+        right={
+          <div>
+            <Section id="nutrition" title="🏷️ FDA栄養成分（ラベル生成用）">
+              <Tip>FDAラベル自動生成に使います。入力するとFDAラベルタブで利用可能に。不要なら空欄でOK。</Tip>
+              <div style={{ marginBottom: "8px" }}>
+                <Btn small onClick={() => setForm(f => ({ ...f, nutrition: f.nutrition ? null : {} }))}>
+                  {form.nutrition ? "❌ 栄養データを削除" : "＋ 栄養データを追加"}
+                </Btn>
+              </div>
+              {form.nutrition && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0 12px" }}>
+                  {NUTRITION_FIELDS.map(f => (
+                    <Field key={f.key} label={f.label} value={form.nutrition[f.key]} onChange={v => un(f.key, v)} type={f.type || "text"} placeholder={f.placeholder || ""} wide={f.type === "textarea"} />
+                  ))}
+                  <Field label="アレルゲン（カンマ区切り）" value={allergenInput} onChange={setAllergenInput} placeholder="soy, wheat" wide />
+                </div>
+              )}
+            </Section>
+          </div>
+        }
+      />
+
+      <div style={{ display: "flex", gap: "10px", marginTop: "16px", justifyContent: "flex-end" }}>
+        <Btn onClick={() => setEditing(null)}>キャンセル</Btn>
+        <Btn primary onClick={save} style={{ opacity: form.name && form.hsCode ? 1 : 0.5 }}>💾 {editing === "new" ? "製品を登録" : "変更を保存"}</Btn>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+// MAIN APP — SIDEBAR + 2-COLUMN DESKTOP LAYOUT
+// ============================================================
+function ORYZAEExportTool() {
+  const [mode, setMode] = useState("dashboard");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [expandedProduct, setExpandedProduct] = useState(null);
+  const [expandedAlerts, setExpandedAlerts] = useState({});
+  const [decisionAnswers, setDecisionAnswers] = useState({});
+  const [decisionResult, setDecisionResult] = useState(null);
+  const [thresholdProduct, setThresholdProduct] = useState(null);
+  const [thresholdValues, setThresholdValues] = useState({});
+  const [guideOpen, setGuideOpen] = useState({});
+
+  // Safe storage: in-memory fallback when localStorage unavailable (e.g. artifact iframe)
+  const _mem = React.useRef({});
+  const _ls = (fn) => { try { return fn(); } catch { return null; } };
+  const sGet = (k, d) => _ls(() => localStorage.getItem(k)) || _mem.current[k] || d;
+  const sGetJ = (k, d) => { const v = _ls(() => localStorage.getItem(k)) || _mem.current[k]; if (v) { try { return JSON.parse(v); } catch {} } return d; };
+  const sSet = (k, v) => { const s = typeof v === "string" ? v : JSON.stringify(v); _mem.current[k] = s; _ls(() => localStorage.setItem(k, s)); };
+  const ssGet = (k, d) => _ls(() => sessionStorage.getItem(k)) || _mem.current["$"+k] || d;
+  const ssSet = (k, v) => { _mem.current["$"+k] = v; _ls(() => sessionStorage.setItem(k, v)); };
+
+  const [globalProductId, setGlobalProductId] = useState(() => sGet("orz_product", ""));
+  const [globalCountryId, setGlobalCountryId] = useState(() => sGet("orz_country", "us"));
+  const [settings, setSettings] = useState(() => sGetJ("orz_settings", JSON.parse(JSON.stringify(DEFAULT_SETTINGS))));
+  const [customProducts, setCustomProducts] = useState(() => sGetJ("orz_custom_products", []));
+  const [apiKey, setApiKey] = useState(() => ssGet("orz_apikey", ""));
+  const [timelineChecks, setTimelineChecks] = useState(() => sGetJ("orz_timeline", {}));
+
+  useEffect(() => { sSet("orz_product", globalProductId); }, [globalProductId]);
+  useEffect(() => { sSet("orz_country", globalCountryId); }, [globalCountryId]);
+  useEffect(() => { sSet("orz_settings", JSON.stringify(settings)); }, [settings]);
+  useEffect(() => { sSet("orz_custom_products", JSON.stringify(customProducts)); }, [customProducts]);
+  useEffect(() => { ssSet("orz_apikey", apiKey); }, [apiKey]);
+  useEffect(() => { sSet("orz_timeline", JSON.stringify(timelineChecks)); }, [timelineChecks]);
+
+  const allProducts = useMemo(() => [...PRODUCT_DATABASE, ...customProducts], [customProducts]);
+
+  const selCountry = COUNTRIES.find((c) => c.id === selectedCountry);
+  const filtered = searchQuery.trim()
+    ? allProducts.filter((p) => { const q = searchQuery.toLowerCase(); return p.name.toLowerCase().includes(q) || p.nameEn.toLowerCase().includes(q) || p.hsCode.includes(q) || p.htsUs.includes(q) || p.tags.some((t) => t.includes(q)) || p.examples.some((e) => e.toLowerCase().includes(q)); })
+    : allProducts;
+
+  const currentQuestion = DECISION_QUESTIONS.find((q) => { if (decisionAnswers[q.id] !== undefined) return false; if (q.condition && !q.condition(decisionAnswers)) return false; return true; });
+
+  const getDecisionResult = useCallback(() => {
+    const a = decisionAnswers;
+    if (a.form === "liquid_drink" && a.alcohol === "high") return "fermented_drink_alc";
+    if (a.form === "liquid_drink" && a.alcohol === "low" && a.carbonation === "yes") return "kojipop";
+    if (a.form === "liquid_drink" && a.alcohol === "low" && a.carbonation === "no") return "amazake_beverage";
+    if (a.primary_function === "sweetener" && a.form === "liquid_seasoning") return "sweetener_liquid";
+    if (a.primary_function === "sweetener" && a.form === "powder") return "sweetener_powder";
+    if (a.primary_function === "sweetener" && a.form === "paste") return "amazake_concentrate";
+    if (a.primary_function === "seasoning") return "koji_seasoning";
+    if (a.primary_function === "ingredient" && a.form === "powder") return "rice_koji_raw";
+    if (a.primary_function === "ingredient") return "koji_enzyme";
+    if (a.primary_function === "functional") return "fermented_paste";
+    if (a.form === "solid") return "granola";
+    if (a.form === "capsule") return "koji_enzyme";
+    return null;
+  }, [decisionAnswers]);
+
+  useEffect(() => { if (!currentQuestion) { const r = getDecisionResult(); if (r) setDecisionResult(allProducts.find((p) => p.id === r)); } }, [currentQuestion, getDecisionResult]);
+
+  const navItems = [
+    { key: "dashboard", icon: "📊", label: "速報" },
+    { key: "classify", icon: "🔍", label: "HS分類" },
+    { key: "tariff", icon: "💰", label: "関税率" },
+    { key: "fda_label", icon: "🏷️", label: "FDAラベル" },
+    { key: "landed", icon: "💵", label: "コスト計算" },
+    { key: "docgen", icon: "📄", label: "書類生成" },
+    { key: "origin", icon: "🌾", label: "原産地判定" },
+    { key: "timeline", icon: "⏱️", label: "タイムライン" },
+    { key: "docs", icon: "📋", label: "必要書類" },
+    { key: "threshold", icon: "⚖️", label: "閾値判定" },
+    { divider: true },
+    { key: "products", icon: "📦", label: "製品管理" },
+    { key: "settings", icon: "⚙️", label: "設定" },
+    { key: "guide", icon: "📖", label: "使い方" },
+  ];
+
+  return (
+    <div style={{ fontFamily: font, display: "flex", minHeight: "100%", background: C.bg }}>
+      {/* SIDEBAR */}
+      <div style={{ width: "180px", background: C.sidebar, display: "flex", flexDirection: "column", flexShrink: 0, minHeight: "100%" }}>
+        <div style={{ padding: "20px 18px 16px" }}>
+          <div style={{ fontSize: "15px", fontWeight: 800, color: "#fff", letterSpacing: "-0.02em" }}>ORYZAE</div>
+          <div style={{ fontSize: "11px", fontWeight: 600, color: "#D4A574", marginTop: "1px" }}>Export Ops v3.0</div>
+        </div>
+        {/* GLOBAL SELECTORS */}
+        <div style={{ padding: "0 10px 10px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+          <select value={globalProductId} onChange={e => setGlobalProductId(e.target.value)} style={{ width: "100%", padding: "6px 8px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.15)", background: "#2D2A22", color: "#F0D38A", fontSize: "11px", marginBottom: "6px", cursor: "pointer" }}>
+            <option value="">-- 製品を選択 --</option>
+            {allProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <div style={{ display: "flex", gap: "3px" }}>
+            {COUNTRIES.map(c => (
+              <button key={c.id} onClick={() => setGlobalCountryId(c.id)} style={{ flex: 1, padding: "4px 0", border: globalCountryId === c.id ? "1.5px solid #F0D38A" : "1px solid rgba(255,255,255,0.1)", borderRadius: "4px", background: globalCountryId === c.id ? "#3D3826" : "transparent", color: globalCountryId === c.id ? "#F0D38A" : "rgba(255,255,255,0.4)", fontSize: "13px", cursor: "pointer", textAlign: "center" }}>{c.flag}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ flex: 1, padding: "0 8px", marginTop: "4px" }}>
+          {navItems.map((item, i) => item.divider ? (
+            <div key={i} style={{ height: "1px", background: "rgba(255,255,255,0.08)", margin: "8px 10px" }} />
+          ) : (
+            <button key={item.key} onClick={() => setMode(item.key)} style={{
+              display: "flex", alignItems: "center", gap: "10px", width: "100%",
+              padding: "10px 14px", border: "none", borderRadius: "8px", cursor: "pointer",
+              background: mode === item.key ? C.sidebarActive : "transparent",
+              color: mode === item.key ? "#F0D38A" : "rgba(255,255,255,0.6)",
+              fontSize: "13px", fontWeight: mode === item.key ? 700 : 500,
+              textAlign: "left", marginBottom: "2px",
+              transition: "all 0.15s",
+            }}>
+              <span style={{ fontSize: "16px", width: "22px", textAlign: "center" }}>{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ padding: "12px 18px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
+            March 2, 2026<br />
+            <span style={{ color: "#D4A574" }}>Sec122: 10%</span>
+          </div>
+        </div>
+      </div>
+
+      {/* MAIN CONTENT */}
+      <div style={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
+        <div style={{ padding: "24px 24px", maxWidth: "960px" }}>
+
+          {/* DASHBOARD */}
+          {mode === "dashboard" && (
+            <div>
+              <SectionHeader sub="最新の貿易規制アラートと市場動向">📊 ダッシュボード</SectionHeader>
+              {globalProductId && (() => {
+                const gp = allProducts.find(p => p.id === globalProductId);
+                const gc = COUNTRIES.find(c => c.id === globalCountryId);
+                if (!gp || !gc) return null;
+                const tariff = gc.tariffs?.[gp.hsCode];
+                const effectiveRate = gc.id === "us" ? ((tariff?.mfnNum || 0) + (gc.section122?.rateNum || 0)) : (tariff?.ftaNum ?? tariff?.mfnNum ?? 0);
+                const hasFda = !!gp.nutrition;
+                const hasMat = gp.materials?.length > 0;
+                return (
+                  <Card style={{ background: "linear-gradient(135deg, #FFFBF0 0%, #FFF9ED 100%)", border: "2px solid " + C.amberBorder, marginBottom: "16px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "10px" }}>
+                      <div>
+                        <div style={{ fontSize: "16px", fontWeight: 800, color: C.text }}>{gp.name}</div>
+                        <div style={{ fontSize: "12px", color: C.textLight }}>{gp.nameEn} → {gc.flag} {gc.name}</div>
+                      </div>
+                      <div style={{ fontFamily: "monospace", fontSize: "16px", fontWeight: 800, color: C.amber }}>{gp.hsCode}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "12px" }}>
+                      {[
+                        { label: "関税（実効）", value: effectiveRate.toFixed(1) + "%", color: effectiveRate > 5 ? "#744210" : C.green, sub: gc.id === "us" && tariff ? "MFN " + tariff.mfn + " + Sec122" : null },
+                        { label: "HTS-US", value: gp.htsUs || "\u2014", mono: true },
+                        { label: "FDAラベル", value: hasFda ? "\u2705 準備済" : "\u274c 未登録", color: hasFda ? C.green : C.red, bg: hasFda ? C.greenBg : "#FFF5F5", borderColor: hasFda ? C.greenBorder : "#FED7D7" },
+                        { label: "原産地判定", value: hasMat ? "\u2705 判定可" : "\u2014 未登録", color: hasMat ? C.green : C.textMuted, bg: hasMat ? C.greenBg : C.grayLight, borderColor: hasMat ? C.greenBorder : C.border },
+                      ].map((item, i) => (
+                        <div key={i} style={{ flex: "1 1 100px", padding: "8px 12px", background: item.bg || C.white, borderRadius: "8px", border: "1px solid " + (item.borderColor || C.border) }}>
+                          <div style={{ fontSize: "10px", color: C.textMuted }}>{item.label}</div>
+                          <div style={{ fontSize: item.mono ? "12px" : "15px", fontWeight: 700, color: item.color || C.text, fontFamily: item.mono ? "monospace" : "inherit" }}>{item.value}</div>
+                          {item.sub && <div style={{ fontSize: "10px", color: C.textMuted }}>{item.sub}</div>}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: "6px", marginTop: "10px", flexWrap: "wrap" }}>
+                      <Btn small onClick={() => setMode("landed")}>💵 コスト試算</Btn>
+                      <Btn small onClick={() => setMode("docgen")}>📄 書類生成</Btn>
+                      {hasFda && <Btn small onClick={() => setMode("fda_label")}>🏷️ FDAラベル</Btn>}
+                      <Btn small onClick={() => setMode("timeline")}>⏱️ タイムライン</Btn>
+                    </div>
+                  </Card>
+                );
+              })()}
+              <TwoCol ratio="1fr 340px"
+                left={
+                  <div>
+                    {US_TRADE_ALERTS.map((a) => <AlertBanner key={a.id} alert={a} expanded={expandedAlerts[a.id]} onToggle={() => setExpandedAlerts((e) => ({ ...e, [a.id]: !e[a.id] }))} />)}
+                  </div>
+                }
+                right={
+                  <div>
+                    <Card style={{ background: C.greenBg, border: `1px solid ${C.greenBorder}` }}>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: C.green, marginBottom: "4px" }}>✅ EU・英国・RCEP</div>
+                      <div style={{ fontSize: "13px", color: C.green, lineHeight: 1.6 }}>安定稼働中。EU Novel Food非該当確認済み。UK BTOM完全施行。</div>
+                    </Card>
+                    <Card style={{ background: C.blueBg, border: `1px solid ${C.blueBorder}` }}>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: C.blue, marginBottom: "4px" }}>ℹ️ KOJIPOP 米国市場への影響</div>
+                      <div style={{ fontSize: "13px", color: C.blue, lineHeight: 1.6 }}>HS 2202.10: MFN 0.2¢/L + Section 122 10% = 実効約10%。de minimis恒久廃止（2027/7/1）でD2C小口も要フォーマルエントリー。</div>
+                    </Card>
+                    <Card>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: C.text, marginBottom: "6px" }}>💱 現在の為替設定</div>
+                      <div style={{ fontSize: "13px", color: C.textLight, lineHeight: 2 }}>
+                        USD/JPY: <strong>¥{settings.fx.usd}</strong><br />
+                        EUR/JPY: <strong>¥{settings.fx.eur}</strong><br />
+                        GBP/JPY: <strong>¥{settings.fx.gbp}</strong>
+                      </div>
+                      <div style={{ marginTop: "8px" }}><Btn small onClick={() => setMode("settings")}>⚙️ 設定を変更</Btn></div>
+                    </Card>
+                  </div>
+                }
+              />
+            </div>
+          )}
+
+          {/* CLASSIFY */}
+          {mode === "classify" && (
+            <div>
+              <SectionHeader sub="商品名・HSコードで検索、またはディシジョンツリーで判定">🔍 HS分類 検索 & 判定</SectionHeader>
+              <TwoCol ratio="1fr 380px"
+                left={
+                  <div>
+                    <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="商品名・HSコード・キーワードで検索" style={{ width: "100%", padding: "12px 16px", border: `1px solid ${C.border}`, borderRadius: "8px", fontSize: "14px", marginBottom: "14px", boxSizing: "border-box", background: C.white }} />
+                    {searchQuery.trim() ? (
+                      <div>
+                        <div style={{ fontSize: "13px", color: C.textLight, marginBottom: "8px" }}>{filtered.length}件の結果</div>
+                        {filtered.map((p) => <ProductCard key={p.id} product={p} expanded={expandedProduct === p.id} onToggle={() => setExpandedProduct(expandedProduct === p.id ? null : p.id)} onSelectCountry={(cId) => { setSelectedCountry(cId); setMode("tariff"); }} />)}
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{ fontSize: "13px", color: C.textLight, marginBottom: "8px" }}>全{allProducts.length}品目</div>
+                        {allProducts.map((p) => <ProductCard key={p.id} product={p} expanded={expandedProduct === p.id} onToggle={() => setExpandedProduct(expandedProduct === p.id ? null : p.id)} onSelectCountry={(cId) => { setSelectedCountry(cId); setMode("tariff"); }} />)}
+                      </div>
+                    )}
+                  </div>
+                }
+                right={
+                  <Card>
+                    <Label>🌳 分類判定ツリー</Label>
+                    {!decisionResult ? (currentQuestion ? (
+                      <div>
+                        <div style={{ display: "flex", gap: "6px", marginBottom: "10px", flexWrap: "wrap" }}>{Object.entries(decisionAnswers).map(([k, v]) => <Pill key={k} color={C.blue} bg={C.blueBg} border={C.blueBorder}>{v}</Pill>)}</div>
+                        <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "10px" }}>Q: {currentQuestion.question}</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>{currentQuestion.options.map((o) => <button key={o.value} onClick={() => setDecisionAnswers((a) => ({ ...a, [currentQuestion.id]: o.value }))} style={{ padding: "10px 14px", border: `1px solid ${C.border}`, borderRadius: "8px", background: C.grayLight, cursor: "pointer", fontSize: "13px", textAlign: "left", transition: "background 0.15s" }}>{o.label}</button>)}</div>
+                        {Object.keys(decisionAnswers).length > 0 && <button onClick={() => { setDecisionAnswers({}); setDecisionResult(null); }} style={{ marginTop: "10px", background: "none", border: "none", cursor: "pointer", fontSize: "13px", color: C.amber, fontWeight: 600 }}>↩ リセット</button>}
+                      </div>
+                    ) : <div style={{ textAlign: "center", color: C.textMuted, fontSize: "13px", padding: "20px" }}>判定中...<br /><button onClick={() => { setDecisionAnswers({}); setDecisionResult(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: C.amber, fontWeight: 600, marginTop: "8px" }}>↩ リセット</button></div>
+                    ) : (
+                      <div>
+                        <div style={{ background: C.greenBg, border: `1px solid ${C.greenBorder}`, borderRadius: "8px", padding: "12px", marginBottom: "10px" }}>
+                          <div style={{ fontSize: "12px", fontWeight: 700, color: C.green }}>✅ 推奨分類</div>
+                          <div style={{ fontSize: "20px", fontWeight: 700, fontFamily: "monospace", color: C.green }}>{decisionResult.hsCode}</div>
+                          <div style={{ fontSize: "14px", fontWeight: 600, color: C.green }}>{decisionResult.name}</div>
+                        </div>
+                        <ProductCard product={decisionResult} expanded onToggle={() => {}} onSelectCountry={(cId) => { setSelectedCountry(cId); setMode("tariff"); }} />
+                        <button onClick={() => { setDecisionAnswers({}); setDecisionResult(null); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "13px", color: C.amber, fontWeight: 600 }}>↩ もう一度判定</button>
+                      </div>
+                    )}
+                  </Card>
+                }
+              />
+            </div>
+          )}
+
+          {/* TARIFF */}
+          {mode === "tariff" && (
+            <div>
+              <SectionHeader sub="国別のMFN税率・FTA特恵税率・追加関税">💰 国別関税率 & FTA</SectionHeader>
+              <CountryTabs selected={selectedCountry} onSelect={setSelectedCountry} />
+              {selCountry && (
+                <TwoCol ratio="340px 1fr"
+                  left={
+                    <Card>
+                      <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "6px" }}>{selCountry.flag} {selCountry.fta}</div>
+                      <div style={{ fontSize: "13px", color: C.textLight, lineHeight: 1.6 }}>{selCountry.ftaNote}</div>
+                      {selCountry.section122 && (
+                        <div style={{ marginTop: "10px", padding: "10px", background: "#FFF5F5", borderRadius: "6px", border: "1px solid #FED7D7" }}>
+                          <div style={{ fontSize: "13px", fontWeight: 700, color: "#9B2C2C" }}>Section 122: {selCountry.section122.rate}</div>
+                          <div style={{ fontSize: "12px", color: "#9B2C2C", marginTop: "2px" }}>期限: {selCountry.section122.expiryDate}</div>
+                        </div>
+                      )}
+                    </Card>
+                  }
+                  right={
+                    <Card style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "400px" }}>
+                        <thead>
+                          <tr>{["HS", "品目", "MFN", selCountry.id === "us" ? "Sec122" : "FTA", "実効税率"].map((h, i) => (
+                            <th key={i} style={{ textAlign: "left", padding: "8px 10px", borderBottom: `2px solid ${C.border}`, fontWeight: 700, color: C.textLight, fontSize: "12px" }}>{h}</th>
+                          ))}</tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(selCountry.tariffs).map(([hs, t]) => {
+                            const prod = allProducts.find((p) => p.hsCode === hs);
+                            const isUs = selCountry.id === "us";
+                            return (
+                              <tr key={hs} style={{ borderBottom: `1px solid ${C.border}` }}>
+                                <td style={{ padding: "8px 10px", fontFamily: "monospace", fontWeight: 600 }}>{hs}</td>
+                                <td style={{ padding: "8px 10px" }}>{prod?.name || ""}</td>
+                                <td style={{ padding: "8px 10px" }}>{t.mfn}</td>
+                                <td style={{ padding: "8px 10px" }}>{isUs ? t.surcharge : t.fta}</td>
+                                <td style={{ padding: "8px 10px", fontWeight: 700, color: isUs ? "#744210" : C.green }}>{isUs ? t.effective : t.fta}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </Card>
+                  }
+                />
+              )}
+            </div>
+          )}
+
+          {mode === "fda_label" && <FDALabelGenerator products={allProducts} initialProduct={globalProductId} />}
+          {mode === "landed" && <LandedCostCalc settings={settings} products={allProducts} initialProduct={globalProductId} initialCountry={globalCountryId} />}
+          {mode === "docgen" && <DocGenerator settings={settings} products={allProducts} initialProduct={globalProductId} initialCountry={globalCountryId} />}
+          {mode === "origin" && <OriginDetermination products={allProducts} initialProduct={globalProductId} />}
+          {mode === "timeline" && <ComplianceTimeline initialCountry={globalCountryId} checked={timelineChecks} onCheckedChange={setTimelineChecks} />}
+
+          {/* DOCS */}
+          {mode === "docs" && (
+            <div>
+              <SectionHeader sub="仕向国別の必要書類とラベル要件">📋 必要書類一覧</SectionHeader>
+              <CountryTabs selected={selectedCountry} onSelect={setSelectedCountry} />
+              <TwoCol ratio="1fr 1fr"
+                left={
+                  <Card>
+                    <Label>📄 書類</Label>
+                    {selCountry?.docs?.map((d, i) => (
+                      <div key={i} style={{ padding: "10px 14px", border: `1px solid ${C.border}`, borderRadius: "8px", background: C.white, marginBottom: "6px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "14px", fontWeight: 600 }}>{d.name}</span>
+                          {d.required ? <Pill color={C.red} bg="#FFF5F5" border="#FED7D7">必須</Pill> : <Pill color={C.gray} bg={C.grayLight} border={C.border}>任意</Pill>}
+                        </div>
+                        {d.desc && <div style={{ fontSize: "12px", color: C.textLight, marginTop: "3px" }}>{d.desc}</div>}
+                      </div>
+                    ))}
+                  </Card>
+                }
+                right={
+                  <Card>
+                    <Label>🏷️ ラベル表示要件</Label>
+                    {selCountry?.labeling?.map((l, i) => (
+                      <div key={i} style={{ padding: "10px 14px", border: `1px solid ${C.border}`, borderRadius: "8px", background: C.white, marginBottom: "6px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "14px", fontWeight: 600 }}>{l.item}</span>
+                          {l.mandatory ? <Pill color={C.red} bg="#FFF5F5" border="#FED7D7">義務</Pill> : <Pill color={C.gray} bg={C.grayLight} border={C.border}>推奨</Pill>}
+                        </div>
+                        <div style={{ fontSize: "12px", color: C.textLight, marginTop: "3px" }}>{l.format}</div>
+                      </div>
+                    ))}
+                  </Card>
+                }
+              />
+            </div>
+          )}
+
+          {/* THRESHOLD */}
+          {mode === "threshold" && (
+            <div>
+              <SectionHeader sub="成分比率によるHS番号変動をシミュレーション">⚖️ 分類閾値シミュレーター</SectionHeader>
+              <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+                {allProducts.filter((p) => p.thresholds?.length > 0).map((p) => (
+                  <button key={p.id} onClick={() => { setThresholdProduct(p); setThresholdValues({}); }} style={{ padding: "8px 16px", border: thresholdProduct?.id === p.id ? `2px solid ${C.amber}` : `1px solid ${C.border}`, borderRadius: "8px", background: thresholdProduct?.id === p.id ? C.amberLight : C.white, cursor: "pointer", fontSize: "13px", fontWeight: thresholdProduct?.id === p.id ? 700 : 500 }}>{p.name}</button>
+                ))}
+              </div>
+              <div style={{ maxWidth: "600px" }}>
+                {thresholdProduct?.thresholds.map((th, i) => {
+                  const val = thresholdValues[th.key];
+                  const result = val !== undefined && val !== "" ? (parseFloat(val) < th.boundary ? th.below : th.above) : null;
+                  return (
+                    <Card key={i}>
+                      <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "8px" }}>{th.param}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <Input value={val ?? ""} onChange={(v) => setThresholdValues((tv) => ({ ...tv, [th.key]: v }))} type="number" placeholder={`境界: ${th.boundary}`} style={{ width: "160px" }} />
+                        <span style={{ fontSize: "13px", color: C.textLight }}>境界値: {th.boundary}</span>
+                      </div>
+                      {result && <div style={{ marginTop: "8px", padding: "8px 14px", background: C.greenBg, border: `1px solid ${C.greenBorder}`, borderRadius: "6px", fontSize: "14px", fontWeight: 600, color: C.green }}>→ {result}</div>}
+                      {th.note && <div style={{ fontSize: "12px", color: C.textMuted, marginTop: "6px" }}>{th.note}</div>}
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {mode === "products" && <ProductManager customProducts={customProducts} onUpdate={setCustomProducts} apiKey={apiKey} />}
+          {mode === "settings" && <SettingsPanel settings={settings} onUpdate={setSettings} apiKey={apiKey} onApiKeyChange={setApiKey} />}
+          {mode === "guide" && <GuidePanel guideOpen={guideOpen} setGuideOpen={setGuideOpen} />}
+
+        </div>
+        {/* FOOTER */}
+        <div style={{ padding: "16px 24px 28px", borderTop: `1px solid ${C.border}`, maxWidth: "960px" }}>
+          <div style={{ fontSize: "11px", color: C.textMuted, lineHeight: 1.7 }}>
+            本ツールは参考情報です。最終判断は各国税関当局・通関士に確認してください。<br />
+            外部専門家が必要: ①米国Licensed Customs Broker（法的義務） ②FDA US Agent（法的義務）<br />
+            © 2026 ORYZAE Inc. — Export Ops v3.0
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.render(React.createElement(ORYZAEExportTool), document.getElementById('root'));
+</script>
+</body>
+</html>
