@@ -20,13 +20,15 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
-const { useState, useCallback, useEffect, useMemo } = React;
+<div id="orz-load" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;gap:12px"><div style="font-size:18px;color:#333">ORYZAE Export Ops</div><div style="font-size:14px;color:#888">Loading...</div></div>
+<script>window.onerror=function(m,s,l){var d=document.getElementById("orz-load");if(d)d.innerHTML="<div style=color:red;padding:20px>Error: "+m+" (line "+l+")</div>";}</script>
+<script>
+var { useState, useCallback, useEffect, useMemo } = React;
 
 // ============================================================
 // DATA: PRODUCTS (existing + nutrition data for FDA labels)
 // ============================================================
-const PRODUCT_DATABASE = [
+var PRODUCT_DATABASE = [
   {
     id:"sweetener_liquid", name:"米麹由来液体甘味料", nameEn:"Rice Koji Liquid Sweetener",
     examples:["オリゼ甘味料（液体）", "米麹シロップ"], hsCode:"1702.90", htsUs:"1702.90.5200",
@@ -349,7 +351,7 @@ const PRODUCT_DATABASE = [
 // ============================================================
 // DATA: TRADE ALERTS & COUNTRIES (March 2, 2026)
 // ============================================================
-const US_TRADE_ALERTS = [
+var US_TRADE_ALERTS = [
   { id: "sec122", severity: "critical", title: "Section 122 サーチャージ発効中（10%）", summary: "2026年2月24日〜（150日間・7月24日期限）。CBP確認レート: 10%", detail: "最高裁がIEEPA関税を違憲判決（2/20）。通商法Section 122に基づく暫定サーチャージ10%が全輸入品に適用中。15%への引上げ可能性あり。", lastVerified: "2026-03-02" },
   { id: "deminimis", severity: "critical", title: "De Minimis 停止継続中（恒久廃止予定）", summary: "$800免税閾値は停止中。全貨物にフォーマルエントリー必要。2027年7月1日恒久廃止", detail: "少額免税$800閾値の停止は継続。D2C小口出荷にも適用。One Big Beautiful Bill Actにより2027年7月1日恒久廃止予定。", lastVerified: "2026-03-02" },
   { id: "ieepa_refund", severity: "info", title: "IEEPA関税の還付可能性", summary: "2025年2月〜2026年2月に支払ったIEEPA関税は還付対象の可能性", detail: "最高裁違憲判決により推計$1,300〜2,000億の還付対象。管轄権は国際通商裁判所。通関士・弁護士に相談推奨。", lastVerified: "2026-03-02" },
@@ -357,7 +359,7 @@ const US_TRADE_ALERTS = [
   { id: "usjapan_fta", severity: "warning", title: "日米貿易協定の法的地位不明確", summary: "2025年7月合意はIEEPA権限に基づくため法的効力が不明", detail: "Section 122は一律10%適用のため日本特有の優遇なし。再交渉動向注視。", lastVerified: "2026-03-02" },
 ];
 
-const COUNTRIES = [
+var COUNTRIES = [
   {
     id:"us", name:"米国", flag:"🇺🇸",
     fta:"日米貿易協定（法的地位不明確）+ Section 122 (10%)",
@@ -507,7 +509,7 @@ const COUNTRIES = [
 // ============================================================
 // DATA: COMPLIANCE TIMELINES (days before shipment)
 // ============================================================
-const TIMELINES = {
+var TIMELINES = {
   us: [
     { day: -120, task: "FDA食品施設登録の確認・更新", category: "fda", tip: "2年ごとの更新。偶数年10-12月が更新期間。初回は最初の出荷前に完了必須。", link: "https://www.fda.gov/food/registration-food-facilities" },
     { day: -90, task: "米国側Customs Brokerの選定・契約", category: "broker", tip: "ディストリビューターが手配済みなら不要。自社手配の場合はNCBFAA会員から選定。" },
@@ -547,7 +549,7 @@ const TIMELINES = {
 // ============================================================
 // DATA: ORIGIN RULES
 // ============================================================
-const ORIGIN_RULES = {
+var ORIGIN_RULES = {
   epa: { name: "日EU EPA", rule: "CTH（4桁関税番号変更）又はRVC40%以上", threshold: 40 },
   cepa: { name: "日英CEPA", rule: "CTH又はRVC40%以上", threshold: 40 },
   cptpp: { name: "CPTPP", rule: "CTH又はRVC45%以上", threshold: 45 },
@@ -557,7 +559,7 @@ const ORIGIN_RULES = {
 // ============================================================
 // DATA: DECISION TREE
 // ============================================================
-const DECISION_QUESTIONS = [
+var DECISION_QUESTIONS = [
   { id: "form", question: "製品の形態は？", options: [
     { label: "液体（飲料）", value: "liquid_drink" }, { label: "液体（調味料・シロップ）", value: "liquid_seasoning" },
     { label: "粉末・顆粒", value: "powder" }, { label: "ペースト・半固体", value: "paste" },
@@ -578,7 +580,7 @@ const DECISION_QUESTIONS = [
 // ============================================================
 // SHIPPER DEFAULT
 // ============================================================
-const SHIPPER = {
+var SHIPPER = {
   name: "株式会社オリゼ / ORYZAE Inc.",
   address: "〒321-8505 栃木県宇都宮市",
   addressEn: "Utsunomiya, Tochigi 321-8505, Japan",
@@ -588,7 +590,7 @@ const SHIPPER = {
 
 // ============================================================
 
-const DEFAULT_SETTINGS = {
+var DEFAULT_SETTINGS = {
   fx: { usd: 150, eur: 162, gbp: 190 },
   freight: { seaPerUnit: 0.5, airPerUnit: 2.5 },
   insurance: 0.5,
@@ -600,14 +602,14 @@ const DEFAULT_SETTINGS = {
 // ============================================================
 // HELPERS
 // ============================================================
-const fmt = (n, d = 0) => n?.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) ?? "—";
-const fmtJPY = (n) => "¥" + fmt(Math.round(n));
-const fmtUSD = (n) => "$" + fmt(n, 2);
+var fmt = (n, d = 0) => n?.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) ?? "—";
+var fmtJPY = (n) => "¥" + fmt(Math.round(n));
+var fmtUSD = (n) => "$" + fmt(n, 2);
 
 // ============================================================
 // DESIGN TOKENS (Desktop)
 // ============================================================
-const C = {
+var C = {
   amber: "#C8850A", amberLight: "#FFF9ED", amberBorder: "#F0D38A",
   red: "#C53030", green: "#276749", greenBg: "#F0FFF4", greenBorder: "#C6F6D5",
   blue: "#2B6CB0", blueBg: "#EBF8FF", blueBorder: "#BEE3F8",
@@ -616,21 +618,23 @@ const C = {
   text: "#2D3748", textLight: "#718096", textMuted: "#A0AEC0",
 };
 
-const font = "'Hiragino Kaku Gothic ProN', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif";
+var font = "'Hiragino Kaku Gothic ProN', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // ============================================================
 // UI PRIMITIVES (Desktop)
 // ============================================================
-const Pill = ({ children, color = "#744210", bg = C.amberLight, border = C.amberBorder, style = {} }) => (
+var Pill = ({ children, color = "#744210", bg = C.amberLight, border = C.amberBorder, style = {} }) => (
   <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: "99px", fontSize: "12px", fontWeight: 600, color, background: bg, border: `1px solid ${border}`, whiteSpace: "nowrap", ...style }}>{children}</span>
 );
 
-const Tip = ({ children }) => (
+var Tip = ({ children }) => (
   <div style={{ background: "#FFFFF0", border: "1px solid #FEFCBF", borderLeft: "3px solid #D69E2E", borderRadius: "6px", padding: "10px 14px", fontSize: "13px", color: "#744210", lineHeight: 1.6, marginTop: "8px" }}>
     💡 {children}
   </div>
 );
 
+</script>
+<script type="text/babel">
 const Card = ({ children, style = {} }) => (
   <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "20px", marginBottom: "14px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", ...style }}>{children}</div>
 );
@@ -2312,6 +2316,7 @@ function ORYZAEExportTool() {
   );
 }
 
+var el=document.getElementById("orz-load");if(el)el.style.display="none";
 ReactDOM.render(React.createElement(ORYZAEExportTool), document.getElementById('root'));
 </script>
 </body>
